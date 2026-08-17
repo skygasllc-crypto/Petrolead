@@ -1,0 +1,53 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: petrolead-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: petrolead
+      POSTGRES_PASSWORD: petrolead
+      POSTGRES_DB: petrolead
+    ports:
+      - "5432:5432"
+    volumes:
+      - petrolead_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U petrolead -d petrolead"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: petrolead-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    # Not used by Phase 1 (discovery runs synchronously via FastAPI's async
+    # event loop). Included now so Phase-2+ background job workers
+    # (Celery + Redis) can be introduced without changing this compose file.
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: petrolead-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://petrolead:petrolead@postgres:5432/petrolead
+      REDIS_URL: redis://redis:6379/0
+      CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+
+volumes:
+  petrolead_postgres_data:

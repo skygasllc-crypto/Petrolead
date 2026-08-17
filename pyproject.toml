@@ -1,0 +1,22 @@
+[project]
+name = "petrolead"
+version = "0.1.0"
+description = "PetroLead — Petroleum & Energy B2B lead discovery platform (Phase 1: Company Discovery)"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+# B008: FastAPI's `Depends(...)` as a default argument is the idiomatic
+# dependency-injection pattern, not the mutable-default footgun this rule
+# targets.
+ignore = ["B008"]
