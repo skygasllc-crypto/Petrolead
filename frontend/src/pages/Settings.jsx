@@ -1,14 +1,28 @@
 const ROADMAP = [
-  { phase: 2, title: "Website & business contact discovery" },
-  { phase: 3, title: "Business email extraction & validation" },
-  { phase: 4, title: "Business telephone extraction & validation" },
-  { phase: 5, title: "Social/company profile discovery via permitted sources" },
-  { phase: 6, title: "B2B source connectors" },
-  { phase: 7, title: "Lead scoring" },
-  { phase: 8, title: "Excel / CSV export" },
-  { phase: 9, title: "Advanced search & filtering" },
-  { phase: 10, title: "Automated lead monitoring & scheduled searches" },
+  { phase: 2, title: "Website & business contact discovery", status: "done" },
+  { phase: 3, title: "Business email extraction & validation", status: "done" },
+  { phase: 4, title: "Business telephone extraction & validation", status: "done" },
+  {
+    phase: 5,
+    title: "Social/company profile discovery via permitted sources",
+    status: "blocked",
+  },
+  { phase: 6, title: "B2B source connectors", status: "blocked" },
+  { phase: 7, title: "Lead scoring", status: "done" },
+  { phase: 8, title: "Excel / CSV export", status: "done" },
+  { phase: 9, title: "Advanced search & filtering", status: "done" },
+  { phase: 10, title: "Automated lead monitoring & scheduled searches", status: "done" },
 ];
+
+const STATUS_LABEL = {
+  done: "Implemented",
+  blocked: "Needs external access",
+};
+
+const STATUS_STYLE = {
+  done: "border-status-high/30 bg-status-high/15 text-status-high",
+  blocked: "border-status-possible/30 bg-status-possible/15 text-status-possible",
+};
 
 export default function Settings() {
   return (
@@ -92,10 +106,24 @@ export default function Settings() {
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-base-700 text-xs font-semibold text-ink-300">
                 {item.phase}
               </span>
-              <span className="text-sm text-ink-300">{item.title}</span>
+              <span className="flex-1 text-sm text-ink-300">{item.title}</span>
+              <span
+                className={`rounded-full border px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${STATUS_STYLE[item.status]}`}
+              >
+                {STATUS_LABEL[item.status]}
+              </span>
             </li>
           ))}
         </ol>
+        <p className="mt-4 text-xs text-ink-700">
+          Phases 5 and 6 need prerequisites this app can&apos;t obtain on its own — an approved
+          LinkedIn/social platform API partnership, and reviewed terms-of-service access to
+          specific B2B directories. The connector architecture (
+          <code className="rounded bg-base-800 px-1 py-0.5">SocialSource</code>,{" "}
+          <code className="rounded bg-base-800 px-1 py-0.5">B2BSource</code>) is already in
+          place; wiring in a real integration is a matter of implementing one connector once
+          that access exists.
+        </p>
       </section>
     </div>
   );

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import io
 import logging
 import math
 
+import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -30,7 +33,11 @@ def get_companies(
     country: str | None = None,
     region: str | None = None,
     industry: str | None = None,
+    product: str | None = None,
     min_relevance: int | None = Query(default=None, ge=0, le=100),
+    min_lead_score: int | None = Query(default=None, ge=0, le=100),
+    has_email: bool | None = None,
+    has_phone: bool | None = None,
     search: str | None = None,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=25, ge=1, le=200),
@@ -42,7 +49,11 @@ def get_companies(
             country=country,
             region=region,
             industry=industry,
+            product=product,
             min_relevance=min_relevance,
+            min_lead_score=min_lead_score,
+            has_email=has_email,
+            has_phone=has_phone,
             search=search,
             page=page,
             page_size=page_size,
@@ -54,6 +65,59 @@ def get_companies(
         ) from exc
 
     return PaginatedCompaniesSchema(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.get("/companies/export")
+def export_companies(
+    format: str = Query(default="csv", pattern="^(csv|xlsx)$"),
+    country: str | None = None,
+    region: str | None = None,
+    industry: str | None = None,
+    product: str | None = None,
+    min_relevance: int | None = Query(default=None, ge=0, le=100),
+    min_lead_score: int | None = Query(default=None, ge=0, le=100),
+    has_email: bool | None = None,
+    has_phone: bool | None = None,
+    search: str | None = None,
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    """Export companies matching the given filters as CSV or Excel (Phase 8)."""
+    try:
+        companies = company_service.export_companies(
+            db,
+            country=country,
+            region=region,
+            industry=industry,
+            product=product,
+            min_relevance=min_relevance,
+            min_lead_score=min_lead_score,
+            has_email=has_email,
+            has_phone=has_phone,
+            search=search,
+        )
+        df = pd.DataFrame(company_service.to_export_rows(companies))
+    except Exception as exc:
+        logger.exception("Failed to export companies")
+        raise HTTPException(
+            status_code=500, detail="Unable to export companies right now."
+        ) from exc
+
+    buffer = io.BytesIO()
+    if format == "xlsx":
+        df.to_excel(buffer, index=False, sheet_name="Companies")
+        media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        filename = "petrolead-companies.xlsx"
+    else:
+        df.to_csv(buffer, index=False)
+        media_type = "text/csv"
+        filename = "petrolead-companies.csv"
+    buffer.seek(0)
+
+    return StreamingResponse(
+        buffer,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/companies/{company_id}", response_model=CompanyDetailSchema)

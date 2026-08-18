@@ -6,6 +6,7 @@ const NAV_ITEMS = [
   { to: "/discover", label: "Discover Companies" },
   { to: "/companies", label: "Companies" },
   { to: "/searches", label: "Search History" },
+  { to: "/scheduled", label: "Scheduled Searches" },
   { to: "/settings", label: "Settings" },
 ];
 

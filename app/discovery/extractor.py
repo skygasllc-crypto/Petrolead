@@ -4,15 +4,17 @@ Two extraction paths:
 
 * `company_from_search_result` — cheap, works off the search snippet alone
   (title/url/snippet). Always available.
-* `enrich_from_website` — optionally fetches the company's own site and
-  pulls a better description out of its meta tags / visible text. Uses
-  httpx + BeautifulSoup against publicly reachable pages only; never
+* `enrich_from_website` — fetches the company's own homepage (and, if
+  found, its Contact page) and pulls a better description, contact page
+  link, social-profile links, and business emails/phones out of them.
+  Uses httpx + BeautifulSoup against publicly reachable pages only; never
   bypasses logins, CAPTCHAs, or anti-bot protections, and fails soft
   (timeouts / malformed HTML never crash the discovery job).
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 
@@ -21,7 +23,9 @@ from bs4 import BeautifulSoup
 
 from app.config import Settings, get_settings
 from app.discovery.contacts import find_contact_page, find_social_profiles
+from app.discovery.emails import MAX_EMAILS_PER_COMPANY, extract_emails, validate_email_domain
 from app.discovery.normalizer import extract_domain
+from app.discovery.phones import MAX_PHONES_PER_COMPANY, extract_phone_candidates, validate_phone
 from app.discovery.search import SearchResultItem
 from app.discovery.types import DiscoveredCompany, DiscoveryRequest
 
@@ -45,16 +49,20 @@ def company_from_search_result(
 
     contact_page_url: str | None = None
     social_profiles: list[dict[str, str]] = []
+    emails: list[dict[str, object]] = []
+    phones: list[dict[str, object]] = []
     if is_mock and website:
-        # Synthetic, clearly-labeled contact/social data for UI testing only
-        # — derived deterministically from the mock domain, never presented
-        # as real. Mirrors the "[MOCK]" labeling already applied to the name.
+        # Synthetic, clearly-labeled contact/social/email/phone data for UI
+        # testing only — deterministically derived from the mock domain,
+        # never presented as real. Mirrors the "[MOCK]" label on the name.
         contact_page_url = f"{website.rstrip('/')}/contact"
         slug = extract_domain(website) or "example"
         social_profiles = [
             {"platform": "linkedin", "url": f"https://linkedin.com/company/{slug}"},
             {"platform": "facebook", "url": f"https://facebook.com/{slug}"},
         ]
+        emails = [{"email": f"info@{slug}", "is_valid": None}]
+        phones = [{"phone": "+000 000 0000", "is_valid": False}]
 
     return DiscoveredCompany(
         company_name=company_name,
@@ -72,6 +80,8 @@ def company_from_search_result(
         is_mock=is_mock,
         contact_page_url=contact_page_url,
         social_profiles=social_profiles,
+        emails=emails,
+        phones=phones,
     )
 
 
@@ -84,10 +94,33 @@ def _clean_title(title: str) -> str:
     return trimmed if len(trimmed) >= max(3, len(title) * 0.4) else title
 
 
+async def _fetch_page(
+    client: httpx.AsyncClient, url: str
+) -> tuple[BeautifulSoup, str, str] | None:
+    """Fetch and parse one page. Returns (soup, visible_text, final_url) or None."""
+    try:
+        response = await client.get(url)
+        response.raise_for_status()
+    except (httpx.HTTPError, httpx.InvalidURL) as exc:
+        logger.warning("extractor: could not fetch %s (%s)", url, exc)
+        return None
+
+    if "html" not in response.headers.get("content-type", ""):
+        return None
+
+    try:
+        soup = BeautifulSoup(response.text, "lxml")
+    except Exception as exc:  # malformed markup shouldn't break the pipeline
+        logger.warning("extractor: could not parse %s (%s)", url, exc)
+        return None
+
+    return soup, soup.get_text(" ", strip=True), str(response.url)
+
+
 async def enrich_from_website(
     company: DiscoveredCompany, *, settings: Settings | None = None
 ) -> DiscoveredCompany:
-    """Best-effort enrichment by fetching the company's public homepage.
+    """Best-effort enrichment by fetching the company's homepage (and Contact page).
 
     Never raises: any network/parse failure just returns `company` unchanged
     (logged, not surfaced as a hard error — a single unreachable site should
@@ -99,36 +132,71 @@ async def enrich_from_website(
     settings = settings or get_settings()
     headers = {"User-Agent": settings.http_user_agent}
 
-    try:
-        async with httpx.AsyncClient(
-            timeout=settings.http_timeout_seconds, follow_redirects=True, headers=headers
-        ) as client:
-            response = await client.get(company.website)
-            response.raise_for_status()
-    except (httpx.HTTPError, httpx.InvalidURL) as exc:
-        logger.warning("enrich_from_website: could not fetch %s (%s)", company.website, exc)
-        return company
+    async with httpx.AsyncClient(
+        timeout=settings.http_timeout_seconds, follow_redirects=True, headers=headers
+    ) as client:
+        home = await _fetch_page(client, company.website)
+        if home is None:
+            return company
+        home_soup, home_text, home_url = home
 
-    content_type = response.headers.get("content-type", "")
-    if "html" not in content_type:
-        return company
+        meta_description = _meta_description(home_soup)
+        if meta_description and (
+            not company.description or len(meta_description) > len(company.description)
+        ):
+            company.description = meta_description
 
-    try:
-        soup = BeautifulSoup(response.text, "lxml")
-    except Exception as exc:  # malformed markup shouldn't break the pipeline
-        logger.warning("enrich_from_website: could not parse %s (%s)", company.website, exc)
-        return company
+        company.contact_page_url = find_contact_page(home_soup, home_url)
+        company.social_profiles = find_social_profiles(home_soup, home_url)
 
-    meta_description = _meta_description(soup)
-    if meta_description and (
-        not company.description or len(meta_description) > len(company.description)
-    ):
-        company.description = meta_description
+        pages = [(home_soup, home_text)]
+        if company.contact_page_url and company.contact_page_url != home_url:
+            contact_page = await _fetch_page(client, company.contact_page_url)
+            if contact_page is not None:
+                contact_soup, contact_text, contact_url = contact_page
+                pages.append((contact_soup, contact_text))
+                # A contact page's own on-page social links take precedence
+                # over anything (rare) found only on the homepage.
+                contact_socials = find_social_profiles(contact_soup, contact_url)
+                if contact_socials:
+                    seen = {p["platform"] for p in company.social_profiles}
+                    company.social_profiles += [
+                        p for p in contact_socials if p["platform"] not in seen
+                    ]
 
-    company.contact_page_url = find_contact_page(soup, str(response.url))
-    company.social_profiles = find_social_profiles(soup, str(response.url))
-
+    await _extract_and_validate_contacts(company, pages)
     return company
+
+
+async def _extract_and_validate_contacts(
+    company: DiscoveredCompany, pages: list[tuple[BeautifulSoup, str]]
+) -> None:
+    """Phase 3/4: pull emails/phones from the fetched pages and validate them."""
+    email_candidates: list[str] = []
+    phone_candidates: list[str] = []
+    for soup, text in pages:
+        email_candidates.extend(extract_emails(soup, text))
+        phone_candidates.extend(extract_phone_candidates(soup, text))
+
+    email_candidates = list(dict.fromkeys(email_candidates))[:MAX_EMAILS_PER_COMPANY]
+    phone_candidates = list(dict.fromkeys(phone_candidates))[:MAX_PHONES_PER_COMPANY]
+
+    if email_candidates:
+        validations = await asyncio.gather(
+            *(validate_email_domain(email) for email in email_candidates)
+        )
+        company.emails = [
+            {"email": email, "is_valid": is_valid}
+            for email, is_valid in zip(email_candidates, validations, strict=True)
+        ]
+
+    if phone_candidates:
+        company.phones = [
+            {"phone": normalized, "is_valid": is_valid}
+            for normalized, is_valid in (
+                validate_phone(raw, country=company.country) for raw in phone_candidates
+            )
+        ]
 
 
 def _meta_description(soup: BeautifulSoup) -> str | None:

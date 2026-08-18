@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.companies import router as companies_router
+from app.api.saved_searches import router as saved_searches_router
 from app.config import get_settings
 from app.core.logging import setup_logging
 from app.database.connection import init_db
@@ -46,7 +47,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -64,6 +65,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 
 app.include_router(companies_router, prefix=settings.api_v1_prefix)
+app.include_router(saved_searches_router, prefix=settings.api_v1_prefix)
 
 
 @app.get(f"{settings.api_v1_prefix}/health", tags=["system"])

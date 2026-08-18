@@ -2,9 +2,9 @@
 
 Phase 1 covers `Company`, `CompanySource` (provenance / dedup trail) and
 `SearchQuery` (discovery job history). Phase 2 adds `CompanyContact` and
-`SocialProfile` for business-contact discovery. The schema stays
-normalized so later phases can add `emails`, `phone_numbers`,
-`lead_scores`, and `verification_results` as new tables with a foreign
+`SocialProfile`. Phase 3/4 add `CompanyEmail`/`CompanyPhone`. Phase 7 adds
+`LeadScore`. The schema stays normalized so later phases (verification
+results, saved/scheduled searches, ...) can add new tables with a foreign
 key onto `companies.id`, without touching what's already here.
 """
 
@@ -14,7 +14,7 @@ import enum
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Enum, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database.connection import Base
@@ -83,6 +83,15 @@ class Company(Base):
     )
     social_profiles: Mapped[list[SocialProfile]] = relationship(
         back_populates="company", cascade="all, delete-orphan"
+    )
+    emails: Mapped[list[CompanyEmail]] = relationship(
+        back_populates="company", cascade="all, delete-orphan"
+    )
+    phones: Mapped[list[CompanyPhone]] = relationship(
+        back_populates="company", cascade="all, delete-orphan"
+    )
+    lead_score: Mapped[LeadScore | None] = relationship(
+        back_populates="company", cascade="all, delete-orphan", uselist=False
     )
 
     def __repr__(self) -> str:  # pragma: no cover
@@ -162,6 +171,82 @@ class SocialProfile(Base):
         return f"<SocialProfile company_id={self.company_id!r} platform={self.platform!r}>"
 
 
+class CompanyEmail(Base):
+    """A business email address found on a company's own public pages (Phase 3).
+
+    `is_valid` reflects a live MX-record check on the domain at discovery
+    time — not proof a mailbox exists, and never established by sending
+    mail. `None` means the check couldn't be completed (not evidence of
+    invalidity), matching `app.discovery.emails.validate_email_domain`.
+    """
+
+    __tablename__ = "company_emails"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    company_id: Mapped[str] = mapped_column(ForeignKey("companies.id"), index=True)
+
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    is_valid: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    discovered_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    company: Mapped[Company] = relationship(back_populates="emails")
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<CompanyEmail company_id={self.company_id!r} email={self.email!r}>"
+
+
+class CompanyPhone(Base):
+    """A business phone number found on a company's own public pages (Phase 4).
+
+    `is_valid` reflects purely structural validation (libphonenumber) — is
+    this a plausible, dialable number for its country — never a placed
+    call.
+    """
+
+    __tablename__ = "company_phones"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    company_id: Mapped[str] = mapped_column(ForeignKey("companies.id"), index=True)
+
+    phone: Mapped[str] = mapped_column(String(50), nullable=False)
+    is_valid: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    discovered_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    company: Mapped[Company] = relationship(back_populates="phones")
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<CompanyPhone company_id={self.company_id!r} phone={self.phone!r}>"
+
+
+class LeadScore(Base):
+    """Composite lead-quality score for a company (Phase 7).
+
+    A simple, transparent weighted formula over relevance + how complete
+    and verified the company's contact footprint is — deliberately not a
+    black box, and recomputed every time new information is discovered.
+    """
+
+    __tablename__ = "lead_scores"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    company_id: Mapped[str] = mapped_column(ForeignKey("companies.id"), unique=True, index=True)
+
+    score: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    relevance_component: Mapped[int] = mapped_column(Integer, default=0)
+    contact_completeness_component: Mapped[int] = mapped_column(Integer, default=0)
+    verified_email_component: Mapped[int] = mapped_column(Integer, default=0)
+    verified_phone_component: Mapped[int] = mapped_column(Integer, default=0)
+
+    computed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    company: Mapped[Company] = relationship(back_populates="lead_score")
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<LeadScore company_id={self.company_id!r} score={self.score!r}>"
+
+
 class SearchQuery(Base):
     """A discovery job submitted by a user — the search history log."""
 
@@ -190,5 +275,44 @@ class SearchQuery(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime)
 
+    # Set only when this run was triggered by a schedule rather than a user
+    # clicking "Discover Companies" (Phase 10).
+    saved_search_id: Mapped[str | None] = mapped_column(
+        ForeignKey("saved_searches.id"), index=True, nullable=True
+    )
+
     def __repr__(self) -> str:  # pragma: no cover
         return f"<SearchQuery id={self.id!r} status={self.status!r}>"
+
+
+class SavedSearch(Base):
+    """A discovery search saved to run automatically on a schedule (Phase 10).
+
+    Execution itself lives in `app.worker` (Celery beat, checking
+    `next_run_at`) so the API layer only ever manages the schedule, never
+    blocks a request on running it.
+    """
+
+    __tablename__ = "saved_searches"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+
+    region: Mapped[str | None] = mapped_column(String(100))
+    country: Mapped[str | None] = mapped_column(String(150))
+    city: Mapped[str | None] = mapped_column(String(150))
+    industry: Mapped[str | None] = mapped_column(String(150))
+    activity: Mapped[str | None] = mapped_column(String(150))
+    products: Mapped[list[str]] = mapped_column(JSON, default=list)
+    keywords: Mapped[list[str]] = mapped_column(JSON, default=list)
+    result_limit: Mapped[int] = mapped_column(Integer, default=25)
+
+    frequency: Mapped[str] = mapped_column(String(20), default="daily")  # "daily" | "weekly"
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime, index=True)
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<SavedSearch id={self.id!r} name={self.name!r}>"

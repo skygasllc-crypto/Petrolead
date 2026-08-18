@@ -10,19 +10,23 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import func, select
+from sqlalchemy import String, cast, func, select
 from sqlalchemy.orm import Session
 
 from app.database.models import (
     Company,
     CompanyContact,
+    CompanyEmail,
+    CompanyPhone,
     CompanySource,
+    LeadScore,
     SearchQuery,
     SearchStatus,
     SocialProfile,
     utcnow,
 )
 from app.discovery.deduplicator import find_match, is_confident_match
+from app.discovery.lead_scoring import compute_lead_score
 from app.discovery.normalizer import extract_domain, normalize_company_name
 from app.discovery.relevance import score_relevance
 from app.discovery.sources import SearchSource
@@ -88,6 +92,45 @@ def _apply_contact_info(db: Session, company: Company, candidate: DiscoveredComp
         existing_platforms.add(platform)
 
 
+def _apply_email_phone_info(company: Company, candidate: DiscoveredCompany) -> None:
+    """Persist newly-seen emails/phones (Phase 3/4). Idempotent per company."""
+    existing_emails = {e.email.lower() for e in company.emails}
+    for entry in candidate.emails:
+        email = entry.get("email")
+        if not email or email.lower() in existing_emails:
+            continue
+        company.emails.append(CompanyEmail(email=email, is_valid=entry.get("is_valid")))
+        existing_emails.add(email.lower())
+
+    existing_phones = {p.phone for p in company.phones}
+    for entry in candidate.phones:
+        phone = entry.get("phone")
+        if not phone or phone in existing_phones:
+            continue
+        company.phones.append(CompanyPhone(phone=phone, is_valid=bool(entry.get("is_valid"))))
+        existing_phones.add(phone)
+
+
+def _apply_lead_score(company: Company) -> None:
+    """Recompute the composite lead score (Phase 7) from current company state."""
+    result = compute_lead_score(
+        relevance_score=company.relevance_score,
+        has_website=bool(company.website),
+        has_contact_page=bool(company.contact and company.contact.contact_page_url),
+        has_social_profile=len(company.social_profiles) > 0,
+        has_verified_email=any(e.is_valid for e in company.emails),
+        has_verified_phone=any(p.is_valid for p in company.phones),
+    )
+    if company.lead_score is None:
+        company.lead_score = LeadScore(score=result.score)
+    else:
+        company.lead_score.score = result.score
+    company.lead_score.relevance_component = result.relevance_component
+    company.lead_score.contact_completeness_component = result.contact_completeness_component
+    company.lead_score.verified_email_component = result.verified_email_component
+    company.lead_score.verified_phone_component = result.verified_phone_component
+
+
 def _create_company(db: Session, candidate: DiscoveredCompany) -> Company:
     company = Company(
         company_name=candidate.company_name,
@@ -118,6 +161,8 @@ def _create_company(db: Session, candidate: DiscoveredCompany) -> Company:
         )
     )
     _apply_contact_info(db, company, candidate)
+    _apply_email_phone_info(company, candidate)
+    _apply_lead_score(company)
     return company
 
 
@@ -143,6 +188,8 @@ def _merge_into_company(
     existing.keywords = _union(existing.keywords, candidate.keywords)
     _apply_relevance(existing)
     _apply_contact_info(db, existing, candidate)
+    _apply_email_phone_info(existing, candidate)
+    _apply_lead_score(existing)
 
     db.add(
         CompanySource(
@@ -258,17 +305,23 @@ async def run_discovery(db: Session, payload: DiscoverRequestSchema) -> SearchQu
     return search_query
 
 
-def list_companies(
-    db: Session,
+def _filtered_companies_stmt(
     *,
     country: str | None = None,
     region: str | None = None,
     industry: str | None = None,
+    product: str | None = None,
     min_relevance: int | None = None,
+    min_lead_score: int | None = None,
+    has_email: bool | None = None,
+    has_phone: bool | None = None,
     search: str | None = None,
-    page: int = 1,
-    page_size: int = 25,
-) -> tuple[list[Company], int]:
+):
+    """Shared WHERE-clause builder for `list_companies` and `export_companies`.
+
+    Kept in one place (Phase 9: advanced search & filtering) so pagination
+    and export always agree on what "matches the filters" means.
+    """
     stmt = select(Company)
     if country:
         stmt = stmt.where(Company.country == country)
@@ -276,11 +329,55 @@ def list_companies(
         stmt = stmt.where(Company.region == region)
     if industry:
         stmt = stmt.where(Company.industry == industry)
+    if product:
+        # Products are stored as a JSON list; a substring match on the
+        # serialized column is portable across SQLite and Postgres, unlike
+        # JSON-array "contains" operators (which aren't dialect-uniform).
+        stmt = stmt.where(cast(Company.products, String).like(f'%"{product}"%'))
     if min_relevance is not None:
         stmt = stmt.where(Company.relevance_score >= min_relevance)
+    if min_lead_score is not None:
+        stmt = stmt.where(Company.lead_score.has(LeadScore.score >= min_lead_score))
+    if has_email is True:
+        stmt = stmt.where(Company.emails.any())
+    elif has_email is False:
+        stmt = stmt.where(~Company.emails.any())
+    if has_phone is True:
+        stmt = stmt.where(Company.phones.any())
+    elif has_phone is False:
+        stmt = stmt.where(~Company.phones.any())
     if search:
         like = f"%{search.strip().lower()}%"
         stmt = stmt.where(Company.normalized_name.like(like))
+    return stmt
+
+
+def list_companies(
+    db: Session,
+    *,
+    country: str | None = None,
+    region: str | None = None,
+    industry: str | None = None,
+    product: str | None = None,
+    min_relevance: int | None = None,
+    min_lead_score: int | None = None,
+    has_email: bool | None = None,
+    has_phone: bool | None = None,
+    search: str | None = None,
+    page: int = 1,
+    page_size: int = 25,
+) -> tuple[list[Company], int]:
+    stmt = _filtered_companies_stmt(
+        country=country,
+        region=region,
+        industry=industry,
+        product=product,
+        min_relevance=min_relevance,
+        min_lead_score=min_lead_score,
+        has_email=has_email,
+        has_phone=has_phone,
+        search=search,
+    )
 
     total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
 
@@ -291,6 +388,67 @@ def list_companies(
     )
     items = list(db.execute(stmt).scalars().all())
     return items, total
+
+
+# Hard ceiling on a single export so an unbounded filter can't return the
+# entire table in one response.
+MAX_EXPORT_ROWS = 5000
+
+
+def export_companies(
+    db: Session,
+    *,
+    country: str | None = None,
+    region: str | None = None,
+    industry: str | None = None,
+    product: str | None = None,
+    min_relevance: int | None = None,
+    min_lead_score: int | None = None,
+    has_email: bool | None = None,
+    has_phone: bool | None = None,
+    search: str | None = None,
+) -> list[Company]:
+    """Return every company matching the filters, unpaginated (Phase 8: export)."""
+    stmt = _filtered_companies_stmt(
+        country=country,
+        region=region,
+        industry=industry,
+        product=product,
+        min_relevance=min_relevance,
+        min_lead_score=min_lead_score,
+        has_email=has_email,
+        has_phone=has_phone,
+        search=search,
+    ).order_by(Company.relevance_score.desc(), Company.discovered_at.desc())
+    stmt = stmt.limit(MAX_EXPORT_ROWS)
+    return list(db.execute(stmt).scalars().all())
+
+
+def to_export_rows(companies: list[Company]) -> list[dict]:
+    """Flatten companies into export rows (Phase 8: CSV/Excel export)."""
+    rows = []
+    for c in companies:
+        rows.append(
+            {
+                "Company Name": c.company_name,
+                "Country": c.country or "",
+                "City": c.city or "",
+                "Region": c.region or "",
+                "Industry": c.industry or "",
+                "Petroleum Activities": ", ".join(c.activities),
+                "Products": ", ".join(c.products),
+                "Website": c.website or "",
+                "Contact Page": c.contact.contact_page_url if c.contact else "",
+                "Social Profiles": ", ".join(f"{p.platform}: {p.url}" for p in c.social_profiles),
+                "Emails": ", ".join(e.email for e in c.emails),
+                "Phones": ", ".join(p.phone for p in c.phones),
+                "Source": c.source or "",
+                "Relevance Score": c.relevance_score,
+                "Lead Score": c.lead_score.score if c.lead_score else "",
+                "Discovery Date": c.discovered_at.isoformat(),
+            }
+        )
+    return rows
 
 
 def get_company(db: Session, company_id: str) -> Company | None:

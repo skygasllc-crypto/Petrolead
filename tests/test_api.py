@@ -96,6 +96,62 @@ class TestCompaniesEndpoint:
         response = client.get("/api/companies?min_relevance=101")
         assert response.status_code == 422
 
+    def test_mock_discovery_includes_emails_phones_and_lead_score(self, client):
+        discover_response = client.post(
+            "/api/discover", json={"country": "United Arab Emirates", "limit": 10}
+        )
+        company_id = discover_response.json()["companies"][0]["id"]
+        assert discover_response.json()["companies"][0]["lead_score"] is not None
+
+        response = client.get(f"/api/companies/{company_id}")
+        body = response.json()
+        assert len(body["emails"]) > 0
+        assert len(body["phones"]) > 0
+        assert body["lead_score_breakdown"]["score"] >= 0
+
+    def test_has_email_and_has_phone_filters(self, client):
+        client.post("/api/discover", json={"country": "United Arab Emirates", "limit": 10})
+        response = client.get("/api/companies?has_email=true")
+        assert response.status_code == 200
+        assert response.json()["total"] > 0
+
+    def test_product_filter(self, client):
+        client.post(
+            "/api/discover",
+            json={"country": "United Arab Emirates", "products": ["EN590"], "limit": 10},
+        )
+        response = client.get("/api/companies?product=EN590")
+        assert response.status_code == 200
+        assert response.json()["total"] > 0
+
+    def test_min_lead_score_filter_out_of_range_rejected(self, client):
+        response = client.get("/api/companies?min_lead_score=101")
+        assert response.status_code == 422
+
+
+class TestExportEndpoint:
+    def test_export_csv(self, client):
+        client.post("/api/discover", json={"country": "United Arab Emirates", "limit": 10})
+        response = client.get("/api/companies/export?format=csv")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/csv")
+        assert "Company Name" in response.text
+        assert "attachment" in response.headers["content-disposition"]
+
+    def test_export_xlsx(self, client):
+        client.post("/api/discover", json={"country": "United Arab Emirates", "limit": 10})
+        response = client.get("/api/companies/export?format=xlsx")
+        assert response.status_code == 200
+        assert "spreadsheetml" in response.headers["content-type"]
+
+    def test_export_rejects_invalid_format(self, client):
+        response = client.get("/api/companies/export?format=pdf")
+        assert response.status_code == 422
+
+    def test_export_with_no_companies_still_succeeds(self, client):
+        response = client.get("/api/companies/export?format=csv")
+        assert response.status_code == 200
+
 
 class TestSearchesEndpoint:
     def test_search_history_recorded(self, client):

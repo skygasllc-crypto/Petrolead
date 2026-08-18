@@ -48,6 +48,11 @@ class DiscoveredCompany:
     # --- Phase 2: business contact discovery ---
     # Populated only from links a company published on its own public
     # website (a "Contact" page link, a linked LinkedIn/Facebook/etc.
-    # profile). Never emails or phone numbers — see Phase 3/4.
+    # profile).
     contact_page_url: str | None = None
     social_profiles: list[dict[str, str]] = field(default_factory=list)
+
+    # --- Phase 3/4: business email & phone extraction ---
+    # Each entry: {"email"|"phone": str, "is_valid": bool | None}.
+    emails: list[dict[str, object]] = field(default_factory=list)
+    phones: list[dict[str, object]] = field(default_factory=list)

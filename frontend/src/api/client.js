@@ -57,6 +57,22 @@ export const api = {
   getCompany: (id) => request(`/companies/${id}`),
 
   listSearches: (params = {}) => request(`/searches${toQuery(params)}`),
+
+  exportUrl: (params = {}) => `${API_BASE}/companies/export${toQuery(params)}`,
+
+  listSavedSearches: () => request("/saved-searches"),
+
+  createSavedSearch: (payload) =>
+    request("/saved-searches", { method: "POST", body: JSON.stringify(payload) }),
+
+  setSavedSearchActive: (id, isActive) =>
+    request(`/saved-searches/${id}${toQuery({ is_active: isActive })}`, {
+      method: "PATCH",
+    }),
+
+  deleteSavedSearch: (id) => request(`/saved-searches/${id}`, { method: "DELETE" }),
+
+  runDueSavedSearches: () => request("/saved-searches/run-due", { method: "POST" }),
 };
 
 export { ApiError };

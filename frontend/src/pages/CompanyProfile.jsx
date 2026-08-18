@@ -39,6 +39,45 @@ const PLATFORM_LABELS = {
   youtube: "YouTube",
 };
 
+function ValidityBadge({ isValid }) {
+  if (isValid === true) {
+    return (
+      <span className="rounded-full border border-status-high/30 bg-status-high/15 px-2 py-0.5 text-[10px] font-medium text-status-high">
+        Verified
+      </span>
+    );
+  }
+  if (isValid === false) {
+    return (
+      <span className="rounded-full border border-status-low/30 bg-status-low/15 px-2 py-0.5 text-[10px] font-medium text-status-low">
+        Unverified
+      </span>
+    );
+  }
+  return (
+    <span className="rounded-full border border-base-600 px-2 py-0.5 text-[10px] font-medium text-ink-700">
+      Check pending
+    </span>
+  );
+}
+
+function ScoreBar({ label, value, max }) {
+  const pct = max > 0 ? Math.round((value / max) * 100) : 0;
+  return (
+    <div>
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-ink-500">{label}</span>
+        <span className="tabular-nums text-ink-300">
+          {value}/{max}
+        </span>
+      </div>
+      <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-base-700">
+        <div className="h-full rounded-full bg-brass-500" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
 function FutureSection({ title }) {
   return (
     <section className="rounded-xl border border-dashed border-base-600 bg-base-850/40 p-6">
@@ -253,10 +292,89 @@ export default function CompanyProfile() {
             )}
           </Section>
 
-          <FutureSection title="Emails" />
-          <FutureSection title="Phone Numbers" />
+          <Section title="Emails">
+            {company.emails.length === 0 ? (
+              <p className="text-sm text-ink-700">
+                No email addresses found on the company&apos;s website.
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {company.emails.map((e) => (
+                  <li
+                    key={e.email}
+                    className="flex items-center justify-between gap-2 rounded-lg border border-base-700 bg-base-800/60 px-3 py-2 text-sm"
+                  >
+                    <a
+                      href={`mailto:${e.email}`}
+                      className="truncate text-ink-100 hover:text-brass-400"
+                    >
+                      {e.email}
+                    </a>
+                    <ValidityBadge isValid={e.is_valid} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Section>
+
+          <Section title="Phone Numbers">
+            {company.phones.length === 0 ? (
+              <p className="text-sm text-ink-700">
+                No phone numbers found on the company&apos;s website.
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {company.phones.map((p) => (
+                  <li
+                    key={p.phone}
+                    className="flex items-center justify-between gap-2 rounded-lg border border-base-700 bg-base-800/60 px-3 py-2 text-sm"
+                  >
+                    <a href={`tel:${p.phone}`} className="text-ink-100 hover:text-brass-400">
+                      {p.phone}
+                    </a>
+                    <ValidityBadge isValid={p.is_valid} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Section>
+
+          <Section title="Lead Score">
+            {company.lead_score_breakdown ? (
+              <div className="flex flex-col gap-4">
+                <div className="text-3xl font-semibold tabular-nums text-brass-400">
+                  {company.lead_score_breakdown.score}
+                  <span className="text-base text-ink-700">/100</span>
+                </div>
+                <div className="flex flex-col gap-3">
+                  <ScoreBar
+                    label="Petroleum relevance"
+                    value={company.lead_score_breakdown.relevance_component}
+                    max={50}
+                  />
+                  <ScoreBar
+                    label="Contact completeness"
+                    value={company.lead_score_breakdown.contact_completeness_component}
+                    max={20}
+                  />
+                  <ScoreBar
+                    label="Verified email"
+                    value={company.lead_score_breakdown.verified_email_component}
+                    max={15}
+                  />
+                  <ScoreBar
+                    label="Verified phone"
+                    value={company.lead_score_breakdown.verified_phone_component}
+                    max={15}
+                  />
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-ink-700">Not yet scored.</p>
+            )}
+          </Section>
+
           <FutureSection title="Verification" />
-          <FutureSection title="Lead Score" />
         </div>
       </div>
     </div>

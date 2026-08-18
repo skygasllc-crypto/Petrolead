@@ -8,6 +8,7 @@ import EmptyState from "../components/EmptyState";
 export default function Dashboard() {
   const [companyTotal, setCompanyTotal] = useState(null);
   const [highlyRelevantTotal, setHighlyRelevantTotal] = useState(null);
+  const [strongLeadTotal, setStrongLeadTotal] = useState(null);
   const [searchTotal, setSearchTotal] = useState(null);
   const [recentCompanies, setRecentCompanies] = useState([]);
   const [recentSearches, setRecentSearches] = useState([]);
@@ -19,6 +20,9 @@ export default function Dashboard() {
     });
     api.listCompanies({ page: 1, page_size: 1, min_relevance: 80 }).then((res) => {
       setHighlyRelevantTotal(res.total);
+    });
+    api.listCompanies({ page: 1, page_size: 1, min_lead_score: 70 }).then((res) => {
+      setStrongLeadTotal(res.total);
     });
     api.listSearches({ page: 1, page_size: 5 }).then((res) => {
       setSearchTotal(res.total);
@@ -43,7 +47,7 @@ export default function Dashboard() {
         </Link>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           label="Companies discovered"
           value={companyTotal ?? "—"}
@@ -53,6 +57,12 @@ export default function Dashboard() {
           label="Highly relevant"
           value={highlyRelevantTotal ?? "—"}
           hint="Relevance score ≥ 80"
+          accent
+        />
+        <StatCard
+          label="Strong leads"
+          value={strongLeadTotal ?? "—"}
+          hint="Lead score ≥ 70"
           accent
         />
         <StatCard label="Searches run" value={searchTotal ?? "—"} hint="Total discovery jobs" />

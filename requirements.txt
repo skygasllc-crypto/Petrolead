@@ -19,6 +19,11 @@ playwright==1.49.1
 # --- Data processing ---
 pandas==2.2.3
 python-dotenv==1.0.1
+openpyxl==3.1.5
+
+# --- Contact extraction & validation (Phase 3/4) ---
+dnspython==2.8.0
+phonenumbers==9.0.37
 
 # --- Background jobs (future) ---
 celery==5.4.0

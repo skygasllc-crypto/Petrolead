@@ -5,6 +5,7 @@ import Discover from "./pages/Discover";
 import Companies from "./pages/Companies";
 import CompanyProfile from "./pages/CompanyProfile";
 import SearchHistory from "./pages/SearchHistory";
+import ScheduledSearches from "./pages/ScheduledSearches";
 import Settings from "./pages/Settings";
 
 export default function App() {
@@ -16,6 +17,7 @@ export default function App() {
         <Route path="/companies" element={<Companies />} />
         <Route path="/companies/:id" element={<CompanyProfile />} />
         <Route path="/searches" element={<SearchHistory />} />
+        <Route path="/scheduled" element={<ScheduledSearches />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
     </Routes>

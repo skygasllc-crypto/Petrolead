@@ -25,9 +25,8 @@ services:
     restart: unless-stopped
     ports:
       - "6379:6379"
-    # Not used by Phase 1 (discovery runs synchronously via FastAPI's async
-    # event loop). Included now so Phase-2+ background job workers
-    # (Celery + Redis) can be introduced without changing this compose file.
+    # Only load-bearing for Phase 10 (scheduled searches, via the `worker`
+    # service below). Every other feature works with the API alone.
 
   backend:
     build:
@@ -48,6 +47,28 @@ services:
         condition: service_healthy
     volumes:
       - ./app:/app/app
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: petrolead-worker
+    restart: unless-stopped
+    command: celery -A app.worker worker --beat --loglevel=info
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://petrolead:petrolead@postgres:5432/petrolead
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./app:/app/app
+    # Runs scheduled searches (Phase 10) created via POST /api/saved-searches.
+    # Everything else in the app works without this service running.
 
 volumes:
   petrolead_postgres_data:

@@ -10,6 +10,7 @@ const COLUMNS = [
   { key: "website", label: "Website", sortable: false },
   { key: "source", label: "Source", sortable: true },
   { key: "relevance_score", label: "Relevance", sortable: true },
+  { key: "lead_score", label: "Lead Score", sortable: true },
 ];
 
 function locationOf(company) {
@@ -124,6 +125,9 @@ export default function CompanyTable({ companies, emptyMessage = "No companies f
               </td>
               <td className="px-4 py-3">
                 <RelevanceBadge score={company.relevance_score} />
+              </td>
+              <td className="px-4 py-3 tabular-nums text-ink-300">
+                {company.lead_score ?? "—"}
               </td>
             </tr>
           ))}

@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../api/client";
-import { REGIONS, INDUSTRIES } from "../lib/constants";
+import { REGIONS, INDUSTRIES, PRODUCTS } from "../lib/constants";
 import CompanyTable from "../components/CompanyTable";
 import ResultsToolbar from "../components/ResultsToolbar";
 import ErrorBanner from "../components/ErrorBanner";
 
 const PAGE_SIZE = 25;
+
+const selectClasses =
+  "rounded-md border border-base-600 bg-base-800 px-3 py-2 text-sm text-ink-100 focus:border-brass-500 focus:outline-none";
 
 export default function Companies() {
   const [items, setItems] = useState([]);
@@ -18,6 +21,22 @@ export default function Companies() {
   const [minRelevance, setMinRelevance] = useState(0);
   const [region, setRegion] = useState("");
   const [industry, setIndustry] = useState("");
+  const [product, setProduct] = useState("");
+  const [hasEmail, setHasEmail] = useState("");
+  const [hasPhone, setHasPhone] = useState("");
+  const [minLeadScore, setMinLeadScore] = useState(0);
+
+  const filters = {
+    search: search || undefined,
+    min_relevance: minRelevance || undefined,
+    region: region || undefined,
+    industry: industry || undefined,
+    product: product || undefined,
+    has_email: hasEmail === "" ? undefined : hasEmail === "true",
+    has_phone: hasPhone === "" ? undefined : hasPhone === "true",
+    min_lead_score: minLeadScore || undefined,
+  };
+  const filterKey = JSON.stringify(filters);
 
   useEffect(() => {
     let cancelled = false;
@@ -25,14 +44,7 @@ export default function Companies() {
     setError(null);
 
     api
-      .listCompanies({
-        page,
-        page_size: PAGE_SIZE,
-        search: search || undefined,
-        min_relevance: minRelevance || undefined,
-        region: region || undefined,
-        industry: industry || undefined,
-      })
+      .listCompanies({ page, page_size: PAGE_SIZE, ...filters })
       .then((res) => {
         if (cancelled) return;
         setItems(res.items);
@@ -49,29 +61,43 @@ export default function Companies() {
     return () => {
       cancelled = true;
     };
-  }, [page, search, minRelevance, region, industry]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, filterKey]);
 
   useEffect(() => {
     setPage(1);
-  }, [search, minRelevance, region, industry]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterKey]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-ink-100">Companies</h1>
-        <p className="mt-1 text-sm text-ink-500">
-          All companies discovered and deduplicated so far, across every search.
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-ink-100">Companies</h1>
+          <p className="mt-1 text-sm text-ink-500">
+            All companies discovered and deduplicated so far, across every search.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <a
+            href={api.exportUrl({ format: "csv", ...filters })}
+            className="rounded-md border border-base-600 px-4 py-2 text-sm font-medium text-ink-300 hover:border-brass-500 hover:text-brass-400"
+          >
+            Export CSV
+          </a>
+          <a
+            href={api.exportUrl({ format: "xlsx", ...filters })}
+            className="rounded-md border border-base-600 px-4 py-2 text-sm font-medium text-ink-300 hover:border-brass-500 hover:text-brass-400"
+          >
+            Export Excel
+          </a>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
-        <select
-          value={region}
-          onChange={(e) => setRegion(e.target.value)}
-          className="rounded-md border border-base-600 bg-base-800 px-3 py-2 text-sm text-ink-100 focus:border-brass-500 focus:outline-none"
-        >
+        <select value={region} onChange={(e) => setRegion(e.target.value)} className={selectClasses}>
           <option value="">All regions</option>
           {REGIONS.map((r) => (
             <option key={r} value={r}>
@@ -82,7 +108,7 @@ export default function Companies() {
         <select
           value={industry}
           onChange={(e) => setIndustry(e.target.value)}
-          className="rounded-md border border-base-600 bg-base-800 px-3 py-2 text-sm text-ink-100 focus:border-brass-500 focus:outline-none"
+          className={selectClasses}
         >
           <option value="">All industries</option>
           {INDUSTRIES.map((i) => (
@@ -91,6 +117,45 @@ export default function Companies() {
             </option>
           ))}
         </select>
+        <select value={product} onChange={(e) => setProduct(e.target.value)} className={selectClasses}>
+          <option value="">All products</option>
+          {PRODUCTS.map((p) => (
+            <option key={p} value={p}>
+              {p}
+            </option>
+          ))}
+        </select>
+        <select
+          value={hasEmail}
+          onChange={(e) => setHasEmail(e.target.value)}
+          className={selectClasses}
+        >
+          <option value="">Any email status</option>
+          <option value="true">Has email</option>
+          <option value="false">No email found</option>
+        </select>
+        <select
+          value={hasPhone}
+          onChange={(e) => setHasPhone(e.target.value)}
+          className={selectClasses}
+        >
+          <option value="">Any phone status</option>
+          <option value="true">Has phone</option>
+          <option value="false">No phone found</option>
+        </select>
+        <label className="flex items-center gap-2 text-xs text-ink-500">
+          Min lead score
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="5"
+            value={minLeadScore}
+            onChange={(e) => setMinLeadScore(Number(e.target.value))}
+            className="w-28 accent-[var(--color-brass-500)]"
+          />
+          <span className="w-8 tabular-nums text-ink-300">{minLeadScore}</span>
+        </label>
       </div>
 
       <ResultsToolbar
@@ -110,7 +175,7 @@ export default function Companies() {
       ) : (
         <CompanyTable
           companies={items}
-          emptyMessage="No companies yet. Run a discovery search to populate this list."
+          emptyMessage="No companies match the current filters."
         />
       )}
 
