@@ -8,7 +8,11 @@ This repository currently implements **Phase 1: Company Identification /
 Discovery** — searching public sources for petroleum-industry companies
 matching a set of criteria (region, country, city, industry, activity,
 product, keywords), then normalizing, deduplicating, scoring, and storing
-them for review in a professional B2B dashboard.
+them for review in a professional B2B dashboard — plus the business-contact
+half of **Phase 2**: discovering each company's own "Contact" page and any
+social-profile links (LinkedIn, Facebook, etc.) it publishes on its
+website. Email and phone-number extraction remain separate, not-yet-built
+phases (3 and 4) — see [Future Development Phases](#future-development-phases).
 
 > PetroLead only discovers companies from legitimate public/business
 > information. It never bypasses logins, CAPTCHAs, or anti-bot protections,
@@ -28,13 +32,14 @@ PetroLead/
 │   │
 │   ├── database/
 │   │   ├── connection.py        # SQLAlchemy engine/session (Postgres or SQLite)
-│   │   └── models.py            # Company, CompanySource, SearchQuery ORM models
+│   │   └── models.py            # Company, CompanySource, CompanyContact, SocialProfile, SearchQuery
 │   │
 │   ├── discovery/                # Discovery engine (source-agnostic)
 │   │   ├── types.py              # DiscoveryRequest / DiscoveredCompany contracts
 │   │   ├── search.py             # QueryBuilder + SearchProvider abstraction
 │   │   ├── sources.py            # BaseSource → SearchSource / WebsiteSource / (B2B, Social — future)
 │   │   ├── extractor.py          # Search result → DiscoveredCompany, website enrichment
+│   │   ├── contacts.py           # Phase 2: contact-page + social-profile link extraction
 │   │   ├── normalizer.py         # Company name normalization, domain extraction
 │   │   ├── deduplicator.py       # Match/merge logic
 │   │   └── relevance.py          # Petroleum-industry relevance scoring
@@ -78,10 +83,15 @@ PetroLead/
   no key ever lives in source.
 - **`database/models.py`** is a normalized relational schema. `Company` is
   intentionally narrow; `CompanySource` records *every* discovery event so
-  dedup merges never lose provenance. Later phases add `contacts`, `emails`,
-  `phone_numbers`, `social_profiles`, `lead_scores`, and
-  `verification_results` as new tables with a foreign key onto
-  `companies.id` — no migration of this table required.
+  dedup merges never lose provenance. `CompanyContact` and `SocialProfile`
+  (Phase 2) hang off `companies.id` the same way; `emails`, `phone_numbers`,
+  `lead_scores`, and `verification_results` will do the same in later
+  phases — no migration of the `companies` table itself required.
+- **`discovery/contacts.py`** extracts only what a company already
+  published in its own page markup — a "Contact" link, a linked
+  LinkedIn/Facebook/etc. profile. It never guesses a handle, never visits
+  a login-gated page, and never extracts emails or phone numbers (Phase
+  3/4 territory).
 - **`services/company_service.py`** is a plain async function
   (`run_discovery`) operating on a SQLAlchemy `Session`. It runs inline on
   FastAPI's event loop today; lifting it into a Celery task later is a
@@ -214,7 +224,11 @@ The suite covers:
   score bounds, negative-term penalties (e.g. "petroleum jelly").
 - **API validation** — invalid `limit`, 404s, pagination bounds, mock-data
   labeling.
-- **Database** — create/read `Company`, `CompanySource`, `SearchQuery`.
+- **Database** — create/read `Company`, `CompanySource`, `CompanyContact`,
+  `SocialProfile`, `SearchQuery`.
+- **Contact discovery** — finding a contact-page link and social-profile
+  links from a page's own markup, ignoring unrelated/`mailto:`/`tel:`
+  links, resolving relative URLs correctly.
 
 Tests run against an isolated SQLite database and the mock search provider
 — no external services or API keys required.
@@ -228,7 +242,7 @@ Tests run against an isolated SQLite database and the mock search provider
 | `GET` | `/api/health` | Liveness check. |
 | `POST` | `/api/discover` | Run a discovery job. Body: region, country, city, industry, activity, products[], keywords[], limit. Returns the persisted, deduplicated companies. |
 | `GET` | `/api/companies` | List discovered companies. Filters: `country`, `region`, `industry`, `min_relevance`, `search`; pagination: `page`, `page_size`. |
-| `GET` | `/api/companies/{id}` | Full company profile, including discovery-source history. |
+| `GET` | `/api/companies/{id}` | Full company profile, including discovery-source history, contact page, and social profiles. |
 | `GET` | `/api/searches` | Search/discovery job history, paginated. |
 
 All request/response bodies are validated with Pydantic; invalid input
@@ -273,13 +287,14 @@ never to the client.
 
 ## Future Development Phases
 
-Phase 1 (this repository) covers company discovery only. The architecture
-is deliberately laid out so these phases can be added without rewriting
-existing code:
+Phase 1 (company discovery) and the business-contact half of Phase 2
+(contact-page + social-profile link discovery) are implemented in this
+repository. The architecture is deliberately laid out so the remaining
+phases can be added without rewriting existing code:
 
 | Phase | Scope |
 |---|---|
-| 2 | Website discovery and business contact discovery |
+| 2 | ~~Website discovery and business contact discovery~~ — contact-page & social-profile link discovery implemented; deeper website verification remains open |
 | 3 | Business email extraction & validation |
 | 4 | Business telephone extraction & validation |
 | 5 | Social/company profile discovery via permitted sources & compliant APIs |
@@ -310,3 +325,9 @@ existing code:
   `is_mock: true` in the API response and a banner in the UI. Configure
   `google_cse`, `bing`, or `serpapi` (with the corresponding API key) to
   discover real companies.
+- **Mock contact/social data.** Mock-mode companies also get a synthetic
+  contact page and LinkedIn/Facebook links, deterministically derived from
+  the same fake mock domain — purely so the Phase 2 UI has something to
+  render without a real search provider. Real (non-mock) companies only
+  ever get a contact page or social link that was an actual `<a href>` on
+  their own public homepage.

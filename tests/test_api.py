@@ -73,6 +73,19 @@ class TestCompaniesEndpoint:
         assert body["id"] == company_id
         assert "sources" in body
 
+    def test_mock_discovery_includes_contact_and_social_data(self, client):
+        discover_response = client.post(
+            "/api/discover", json={"country": "United Arab Emirates", "limit": 10}
+        )
+        company_id = discover_response.json()["companies"][0]["id"]
+        response = client.get(f"/api/companies/{company_id}")
+        body = response.json()
+        # Mock mode synthesizes clearly-labeled contact/social data so the
+        # Phase 2 UI has something to render without a real search provider.
+        assert body["contact"]["contact_page_url"].endswith("/contact")
+        assert len(body["social_profiles"]) > 0
+        assert {"linkedin", "facebook"} <= {p["platform"] for p in body["social_profiles"]}
+
     def test_pagination_bounds(self, client):
         response = client.get("/api/companies?page_size=500")
         assert response.status_code == 422

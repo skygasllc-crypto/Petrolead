@@ -44,3 +44,10 @@ class DiscoveredCompany:
     source: str = "unknown"
     source_url: str | None = None
     is_mock: bool = False
+
+    # --- Phase 2: business contact discovery ---
+    # Populated only from links a company published on its own public
+    # website (a "Contact" page link, a linked LinkedIn/Facebook/etc.
+    # profile). Never emails or phone numbers — see Phase 3/4.
+    contact_page_url: str | None = None
+    social_profiles: list[dict[str, str]] = field(default_factory=list)

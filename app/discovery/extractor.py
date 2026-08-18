@@ -20,6 +20,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.config import Settings, get_settings
+from app.discovery.contacts import find_contact_page, find_social_profiles
 from app.discovery.normalizer import extract_domain
 from app.discovery.search import SearchResultItem
 from app.discovery.types import DiscoveredCompany, DiscoveryRequest
@@ -40,10 +41,24 @@ def company_from_search_result(
 ) -> DiscoveredCompany:
     """Build a first-pass `DiscoveredCompany` from a search result alone."""
     company_name = _clean_title(result.title) or result.url
+    website = result.url or None
+
+    contact_page_url: str | None = None
+    social_profiles: list[dict[str, str]] = []
+    if is_mock and website:
+        # Synthetic, clearly-labeled contact/social data for UI testing only
+        # — derived deterministically from the mock domain, never presented
+        # as real. Mirrors the "[MOCK]" labeling already applied to the name.
+        contact_page_url = f"{website.rstrip('/')}/contact"
+        slug = extract_domain(website) or "example"
+        social_profiles = [
+            {"platform": "linkedin", "url": f"https://linkedin.com/company/{slug}"},
+            {"platform": "facebook", "url": f"https://facebook.com/{slug}"},
+        ]
 
     return DiscoveredCompany(
         company_name=company_name,
-        website=result.url or None,
+        website=website,
         country=request.country,
         city=request.city,
         region=request.region,
@@ -55,6 +70,8 @@ def company_from_search_result(
         source=source,
         source_url=result.url or None,
         is_mock=is_mock,
+        contact_page_url=contact_page_url,
+        social_profiles=social_profiles,
     )
 
 
@@ -108,10 +125,8 @@ async def enrich_from_website(
     ):
         company.description = meta_description
 
-    domain = extract_domain(company.website)
-    if domain:
-        # Keep company_name as-is; domain is used downstream for dedup, not display.
-        pass
+    company.contact_page_url = find_contact_page(soup, str(response.url))
+    company.social_profiles = find_social_profiles(soup, str(response.url))
 
     return company
 

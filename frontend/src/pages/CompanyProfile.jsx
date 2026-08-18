@@ -31,6 +31,14 @@ function TagList({ items, empty = "None recorded." }) {
   );
 }
 
+const PLATFORM_LABELS = {
+  linkedin: "LinkedIn",
+  facebook: "Facebook",
+  twitter: "X / Twitter",
+  instagram: "Instagram",
+  youtube: "YouTube",
+};
+
 function FutureSection({ title }) {
   return (
     <section className="rounded-xl border border-dashed border-base-600 bg-base-850/40 p-6">
@@ -202,10 +210,51 @@ export default function CompanyProfile() {
             <TagList items={company.keywords} empty="No keywords recorded." />
           </Section>
 
-          <FutureSection title="Contacts" />
+          <Section title="Contact Page">
+            {company.contact?.contact_page_url ? (
+              <a
+                href={company.contact.contact_page_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="break-all text-sm text-teal-400 hover:underline"
+              >
+                {company.contact.contact_page_url}
+              </a>
+            ) : (
+              <p className="text-sm text-ink-700">
+                No contact page found on the company&apos;s website.
+              </p>
+            )}
+          </Section>
+
+          <Section title="Social Profiles">
+            {company.social_profiles.length === 0 ? (
+              <p className="text-sm text-ink-700">
+                No social profiles found on the company&apos;s website.
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {company.social_profiles.map((s) => (
+                  <li key={s.platform}>
+                    <a
+                      href={s.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-between gap-2 rounded-lg border border-base-700 bg-base-800/60 px-3 py-2 text-sm hover:border-brass-500"
+                    >
+                      <span className="font-medium text-ink-100">
+                        {PLATFORM_LABELS[s.platform] || s.platform}
+                      </span>
+                      <span className="truncate text-xs text-teal-400">{s.url}</span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Section>
+
           <FutureSection title="Emails" />
           <FutureSection title="Phone Numbers" />
-          <FutureSection title="Social Profiles" />
           <FutureSection title="Verification" />
           <FutureSection title="Lead Score" />
         </div>

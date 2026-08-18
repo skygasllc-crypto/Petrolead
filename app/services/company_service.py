@@ -13,7 +13,15 @@ import logging
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.database.models import Company, CompanySource, SearchQuery, SearchStatus, utcnow
+from app.database.models import (
+    Company,
+    CompanyContact,
+    CompanySource,
+    SearchQuery,
+    SearchStatus,
+    SocialProfile,
+    utcnow,
+)
 from app.discovery.deduplicator import find_match, is_confident_match
 from app.discovery.normalizer import extract_domain, normalize_company_name
 from app.discovery.relevance import score_relevance
@@ -57,6 +65,29 @@ def _apply_relevance(company: Company) -> None:
     company.relevance_score = result.score
 
 
+def _apply_contact_info(db: Session, company: Company, candidate: DiscoveredCompany) -> None:
+    """Fill in the contact page + any newly-seen social profiles (Phase 2).
+
+    Idempotent: re-running discovery on an already-known company only adds
+    what's missing, never overwrites a contact page already on file, and
+    never inserts a duplicate (platform, url) social profile row.
+    """
+    if candidate.contact_page_url:
+        if company.contact is None:
+            company.contact = CompanyContact(contact_page_url=candidate.contact_page_url)
+        elif not company.contact.contact_page_url:
+            company.contact.contact_page_url = candidate.contact_page_url
+
+    existing_platforms = {p.platform for p in company.social_profiles}
+    for profile in candidate.social_profiles:
+        platform = profile.get("platform")
+        url = profile.get("url")
+        if not platform or not url or platform in existing_platforms:
+            continue
+        company.social_profiles.append(SocialProfile(platform=platform, url=url))
+        existing_platforms.add(platform)
+
+
 def _create_company(db: Session, candidate: DiscoveredCompany) -> Company:
     company = Company(
         company_name=candidate.company_name,
@@ -86,6 +117,7 @@ def _create_company(db: Session, candidate: DiscoveredCompany) -> Company:
             match_confidence=1.0,
         )
     )
+    _apply_contact_info(db, company, candidate)
     return company
 
 
@@ -110,6 +142,7 @@ def _merge_into_company(
     existing.products = _union(existing.products, candidate.products)
     existing.keywords = _union(existing.keywords, candidate.keywords)
     _apply_relevance(existing)
+    _apply_contact_info(db, existing, candidate)
 
     db.add(
         CompanySource(

@@ -1,4 +1,11 @@
-from app.database.models import Company, CompanySource, SearchQuery, SearchStatus
+from app.database.models import (
+    Company,
+    CompanyContact,
+    CompanySource,
+    SearchQuery,
+    SearchStatus,
+    SocialProfile,
+)
 from app.discovery.normalizer import normalize_company_name
 
 
@@ -55,6 +62,41 @@ class TestCompanyModel:
 
         assert len(company.sources) == 1
         assert company.sources[0].source == "search:mock"
+
+    def test_company_contact_relationship(self, db_session):
+        company = Company(
+            company_name="Falcon Oil Trading LLC",
+            normalized_name=normalize_company_name("Falcon Oil Trading LLC"),
+            relevance_score=50,
+        )
+        db_session.add(company)
+        db_session.commit()
+        db_session.refresh(company)
+
+        company.contact = CompanyContact(contact_page_url="https://falconoil.example/contact")
+        db_session.commit()
+        db_session.refresh(company)
+
+        assert company.contact.contact_page_url == "https://falconoil.example/contact"
+
+    def test_social_profile_relationship(self, db_session):
+        company = Company(
+            company_name="Falcon Oil Trading LLC",
+            normalized_name=normalize_company_name("Falcon Oil Trading LLC"),
+            relevance_score=50,
+        )
+        db_session.add(company)
+        db_session.commit()
+        db_session.refresh(company)
+
+        company.social_profiles.append(
+            SocialProfile(platform="linkedin", url="https://linkedin.com/company/falconoil")
+        )
+        db_session.commit()
+        db_session.refresh(company)
+
+        assert len(company.social_profiles) == 1
+        assert company.social_profiles[0].platform == "linkedin"
 
 
 class TestSearchQueryModel:

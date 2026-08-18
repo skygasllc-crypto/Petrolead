@@ -68,6 +68,21 @@ class CompanySummarySchema(BaseModel):
     discovered_at: datetime
 
 
+class CompanyContactSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    contact_page_url: str | None
+    discovered_at: datetime
+
+
+class SocialProfileSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    platform: str
+    url: str
+    discovered_at: datetime
+
+
 class CompanyDetailSchema(CompanySummarySchema):
     normalized_name: str
     description: str | None
@@ -77,6 +92,8 @@ class CompanyDetailSchema(CompanySummarySchema):
     source_url: str | None
     updated_at: datetime
     sources: list[CompanySourceSchema] = Field(default_factory=list)
+    contact: CompanyContactSchema | None = None
+    social_profiles: list[SocialProfileSchema] = Field(default_factory=list)
 
 
 class PaginatedCompaniesSchema(BaseModel):
