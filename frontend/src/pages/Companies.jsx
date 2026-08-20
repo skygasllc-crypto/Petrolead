@@ -24,6 +24,7 @@ export default function Companies() {
   const [product, setProduct] = useState("");
   const [hasEmail, setHasEmail] = useState("");
   const [hasPhone, setHasPhone] = useState("");
+  const [hasExported, setHasExported] = useState("");
   const [minLeadScore, setMinLeadScore] = useState(0);
 
   const filters = {
@@ -34,9 +35,25 @@ export default function Companies() {
     product: product || undefined,
     has_email: hasEmail === "" ? undefined : hasEmail === "true",
     has_phone: hasPhone === "" ? undefined : hasPhone === "true",
+    has_exported: hasExported === "" ? undefined : hasExported === "true",
     min_lead_score: minLeadScore || undefined,
   };
   const filterKey = JSON.stringify(filters);
+
+  function refetch() {
+    setLoading(true);
+    setError(null);
+    return api
+      .listCompanies({ page, page_size: PAGE_SIZE, ...filters })
+      .then((res) => {
+        setItems(res.items);
+        setTotal(res.total);
+      })
+      .catch((err) => {
+        setError(err instanceof ApiError ? err.message : "Failed to load companies.");
+      })
+      .finally(() => setLoading(false));
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -69,6 +86,13 @@ export default function Companies() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterKey]);
 
+  async function handleExport(format) {
+    await api.exportCompanies({ format, ...filters });
+    // Exporting stamps exported_at server-side — refresh so the "Exported"
+    // badge (and an active has_exported filter) reflect it immediately.
+    refetch();
+  }
+
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
@@ -81,18 +105,20 @@ export default function Companies() {
           </p>
         </div>
         <div className="flex gap-2">
-          <a
-            href={api.exportUrl({ format: "csv", ...filters })}
+          <button
+            type="button"
+            onClick={() => handleExport("csv")}
             className="rounded-md border border-base-600 px-4 py-2 text-sm font-medium text-ink-300 hover:border-brass-500 hover:text-brass-400"
           >
             Export CSV
-          </a>
-          <a
-            href={api.exportUrl({ format: "xlsx", ...filters })}
+          </button>
+          <button
+            type="button"
+            onClick={() => handleExport("xlsx")}
             className="rounded-md border border-base-600 px-4 py-2 text-sm font-medium text-ink-300 hover:border-brass-500 hover:text-brass-400"
           >
             Export Excel
-          </a>
+          </button>
         </div>
       </div>
 
@@ -142,6 +168,15 @@ export default function Companies() {
           <option value="">Any phone status</option>
           <option value="true">Has phone</option>
           <option value="false">No phone found</option>
+        </select>
+        <select
+          value={hasExported}
+          onChange={(e) => setHasExported(e.target.value)}
+          className={selectClasses}
+        >
+          <option value="">Any export status</option>
+          <option value="false">Not yet exported</option>
+          <option value="true">Already exported</option>
         </select>
         <label className="flex items-center gap-2 text-xs text-ink-500">
           Min lead score

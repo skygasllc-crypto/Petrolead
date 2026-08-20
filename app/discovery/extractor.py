@@ -25,7 +25,12 @@ from app.config import Settings, get_settings
 from app.discovery.contacts import find_contact_page, find_social_profiles
 from app.discovery.emails import MAX_EMAILS_PER_COMPANY, extract_emails, validate_email_domain
 from app.discovery.normalizer import extract_domain
-from app.discovery.phones import MAX_PHONES_PER_COMPANY, extract_phone_candidates, validate_phone
+from app.discovery.phones import (
+    MAX_PHONES_PER_COMPANY,
+    extract_phone_text_candidates,
+    extract_tel_link_candidates,
+    validate_phone,
+)
 from app.discovery.search import SearchResultItem
 from app.discovery.types import DiscoveredCompany, DiscoveryRequest
 
@@ -42,10 +47,19 @@ def company_from_search_result(
     *,
     source: str,
     is_mock: bool = False,
+    treat_url_as_website: bool = True,
 ) -> DiscoveredCompany:
-    """Build a first-pass `DiscoveredCompany` from a search result alone."""
+    """Build a first-pass `DiscoveredCompany` from a search result alone.
+
+    `treat_url_as_website=False` is used for B2B-directory-sourced results
+    (Phase 6): the result URL is a third party's own listing page, not the
+    company's site, so it's kept only as `source_url` (provenance) and
+    never as `website` — which matters because `enrich_from_website` would
+    otherwise fetch it, i.e. scrape the directory's page. See
+    `discovery/search.py` for the full rationale.
+    """
     company_name = _clean_title(result.title) or result.url
-    website = result.url or None
+    website = result.url if (treat_url_as_website and result.url) else None
 
     contact_page_url: str | None = None
     social_profiles: list[dict[str, str]] = []
@@ -140,6 +154,14 @@ async def enrich_from_website(
             return company
         home_soup, home_text, home_url = home
 
+        if company.company_name == company.website:
+            # WebsiteSource seeds company_name with the raw URL as a
+            # placeholder (it doesn't know the company's real name yet) —
+            # pull a proper one from the page itself now that it's fetched.
+            page_title = _page_title(home_soup)
+            if page_title:
+                company.company_name = _clean_title(page_title) or company.company_name
+
         meta_description = _meta_description(home_soup)
         if meta_description and (
             not company.description or len(meta_description) > len(company.description)
@@ -173,13 +195,14 @@ async def _extract_and_validate_contacts(
 ) -> None:
     """Phase 3/4: pull emails/phones from the fetched pages and validate them."""
     email_candidates: list[str] = []
-    phone_candidates: list[str] = []
+    tel_candidates: list[str] = []
+    text_phone_candidates: list[str] = []
     for soup, text in pages:
         email_candidates.extend(extract_emails(soup, text))
-        phone_candidates.extend(extract_phone_candidates(soup, text))
+        tel_candidates.extend(extract_tel_link_candidates(soup))
+        text_phone_candidates.extend(extract_phone_text_candidates(text))
 
     email_candidates = list(dict.fromkeys(email_candidates))[:MAX_EMAILS_PER_COMPANY]
-    phone_candidates = list(dict.fromkeys(phone_candidates))[:MAX_PHONES_PER_COMPANY]
 
     if email_candidates:
         validations = await asyncio.gather(
@@ -190,13 +213,45 @@ async def _extract_and_validate_contacts(
             for email, is_valid in zip(email_candidates, validations, strict=True)
         ]
 
-    if phone_candidates:
-        company.phones = [
-            {"phone": normalized, "is_valid": is_valid}
-            for normalized, is_valid in (
-                validate_phone(raw, country=company.country) for raw in phone_candidates
-            )
-        ]
+    company.phones = _validate_and_merge_phones(
+        tel_candidates, text_phone_candidates, country=company.country
+    )
+
+
+def _validate_and_merge_phones(
+    tel_candidates: list[str], text_candidates: list[str], *, country: str | None
+) -> list[dict[str, object]]:
+    """`tel:` links are trusted regardless of validation outcome (the page
+    author explicitly marked them as a phone number). Plaintext matches are
+    noisy — dates, version strings, code samples all match the loose regex
+    — so only ones that pass real structural validation are kept."""
+    entries: list[dict[str, object]] = []
+    seen_digits: set[str] = set()
+
+    for raw in tel_candidates:
+        normalized, is_valid = validate_phone(raw, country=country)
+        key = re.sub(r"[^0-9]", "", normalized)
+        if key and key not in seen_digits:
+            seen_digits.add(key)
+            entries.append({"phone": normalized, "is_valid": is_valid})
+
+    for raw in text_candidates:
+        normalized, is_valid = validate_phone(raw, country=country)
+        if not is_valid:
+            continue
+        key = re.sub(r"[^0-9]", "", normalized)
+        if key and key not in seen_digits:
+            seen_digits.add(key)
+            entries.append({"phone": normalized, "is_valid": True})
+
+    return entries[:MAX_PHONES_PER_COMPANY]
+
+
+def _page_title(soup: BeautifulSoup) -> str | None:
+    tag = soup.find("title")
+    if tag and tag.get_text(strip=True):
+        return tag.get_text(strip=True)
+    return None
 
 
 def _meta_description(soup: BeautifulSoup) -> str | None:

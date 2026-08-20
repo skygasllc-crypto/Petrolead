@@ -2,9 +2,11 @@ import { useMemo, useState } from "react";
 import { api, ApiError } from "../api/client";
 import { REGIONS, INDUSTRIES, PRODUCTS, RESULT_LIMITS, COUNTRIES } from "../lib/constants";
 import DiscoveryProgress from "../components/DiscoveryProgress";
-import CompanyTable from "../components/CompanyTable";
+import PreviewResultsTable from "../components/PreviewResultsTable";
 import ResultsToolbar from "../components/ResultsToolbar";
 import ErrorBanner from "../components/ErrorBanner";
+import QuickUrlLookup from "../components/QuickUrlLookup";
+import BulkContactLookup from "../components/BulkContactLookup";
 
 const INITIAL_FORM = {
   region: "",
@@ -14,6 +16,8 @@ const INITIAL_FORM = {
   products: [],
   keywords: "",
   limit: 25,
+  includeSocialSearch: true,
+  includeB2bDirectories: false,
 };
 
 function Field({ label, children }) {
@@ -37,6 +41,10 @@ export default function Discover() {
   const [search, setSearch] = useState("");
   const [minRelevance, setMinRelevance] = useState(0);
 
+  // Keyed by index into result.companies. { status: idle|saving|saved|error, companyId, error }
+  const [savedState, setSavedState] = useState({});
+  const [savingAll, setSavingAll] = useState(false);
+
   function update(field, value) {
     setForm((f) => ({ ...f, [field]: value }));
   }
@@ -55,6 +63,7 @@ export default function Discover() {
     setStatus("loading");
     setError(null);
     setResult(null);
+    setSavedState({});
 
     const payload = {
       region: form.region || null,
@@ -67,6 +76,8 @@ export default function Discover() {
         .map((k) => k.trim())
         .filter(Boolean),
       limit: form.limit,
+      include_social_search: form.includeSocialSearch,
+      include_b2b_directories: form.includeB2bDirectories,
     };
 
     try {
@@ -82,15 +93,91 @@ export default function Discover() {
   const filteredCompanies = useMemo(() => {
     if (!result) return [];
     const query = search.trim().toLowerCase();
-    return result.companies.filter((c) => {
-      if (c.relevance_score < minRelevance) return false;
-      if (!query) return true;
-      const haystack = `${c.company_name} ${c.country || ""} ${c.city || ""} ${
-        c.industry || ""
-      } ${(c.products || []).join(" ")}`.toLowerCase();
-      return haystack.includes(query);
-    });
+    return result.companies
+      .map((item, index) => ({ item, index }))
+      .filter(({ item: c }) => {
+        if (c.relevance_score < minRelevance) return false;
+        if (!query) return true;
+        const haystack = `${c.company_name} ${c.country || ""} ${c.city || ""} ${
+          c.industry || ""
+        } ${(c.products || []).join(" ")}`.toLowerCase();
+        return haystack.includes(query);
+      });
   }, [result, search, minRelevance]);
+
+  const unsavedCount = useMemo(() => {
+    if (!result) return 0;
+    return result.companies.filter(
+      (c, index) => !c.already_saved && savedState[index]?.status !== "saved",
+    ).length;
+  }, [result, savedState]);
+
+  async function handleSaveOne(index) {
+    const company = result.companies[index];
+    setSavedState((s) => ({ ...s, [index]: { status: "saving" } }));
+    try {
+      const saved = await api.saveCompany(company);
+      setSavedState((s) => ({ ...s, [index]: { status: "saved", companyId: saved.id } }));
+    } catch (err) {
+      setSavedState((s) => ({
+        ...s,
+        [index]: {
+          status: "error",
+          error: err instanceof ApiError ? err.message : "Could not save.",
+        },
+      }));
+    }
+  }
+
+  async function handleSaveAll() {
+    if (!result) return;
+    const toSave = result.companies
+      .map((c, index) => ({ c, index }))
+      .filter(({ c, index }) => !c.already_saved && savedState[index]?.status !== "saved");
+    if (toSave.length === 0) return;
+
+    setSavingAll(true);
+    setSavedState((s) => {
+      const next = { ...s };
+      toSave.forEach(({ index }) => {
+        next[index] = { status: "saving" };
+      });
+      return next;
+    });
+
+    try {
+      const response = await api.saveCompaniesBulk(toSave.map(({ c }) => c));
+      const remaining = [...response.saved];
+      setSavedState((s) => {
+        const next = { ...s };
+        toSave.forEach(({ c, index }) => {
+          const matchIdx = remaining.findIndex(
+            (saved) =>
+              saved.company_name === c.company_name &&
+              (saved.website || null) === (c.website || null),
+          );
+          if (matchIdx === -1) {
+            next[index] = { status: "error", error: "Could not save." };
+            return;
+          }
+          const [saved] = remaining.splice(matchIdx, 1);
+          next[index] = { status: "saved", companyId: saved.id };
+        });
+        return next;
+      });
+    } catch (err) {
+      const message = err instanceof ApiError ? err.message : "Could not save.";
+      setSavedState((s) => {
+        const next = { ...s };
+        toSave.forEach(({ index }) => {
+          next[index] = { status: "error", error: message };
+        });
+        return next;
+      });
+    } finally {
+      setSavingAll(false);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-8">
@@ -101,6 +188,10 @@ export default function Discover() {
           matching your criteria.
         </p>
       </div>
+
+      <QuickUrlLookup />
+
+      <BulkContactLookup />
 
       <form
         onSubmit={handleSubmit}
@@ -208,6 +299,44 @@ export default function Discover() {
           </div>
         </div>
 
+        <div className="flex flex-col gap-3 sm:col-span-2 lg:col-span-3">
+          <span className="text-xs font-medium uppercase tracking-wide text-ink-700">
+            Additional sources (Phase 5/6, partial — search-engine discovery only)
+          </span>
+          <label className="flex items-start gap-2.5 rounded-lg border border-base-700 bg-base-800/40 p-3 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5 accent-[var(--color-brass-500)]"
+              checked={form.includeSocialSearch}
+              onChange={(e) => update("includeSocialSearch", e.target.checked)}
+            />
+            <span>
+              <span className="text-ink-100">Include social-platform search</span>
+              <span className="block text-xs text-ink-700">
+                Finds LinkedIn/Facebook company pages via search-engine{" "}
+                <code className="rounded bg-base-900 px-1">site:</code> queries — never logs
+                into or scrapes those platforms. Adds extra search-provider calls.
+              </span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2.5 rounded-lg border border-base-700 bg-base-800/40 p-3 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5 accent-[var(--color-brass-500)]"
+              checked={form.includeB2bDirectories}
+              onChange={(e) => update("includeB2bDirectories", e.target.checked)}
+            />
+            <span>
+              <span className="text-ink-100">Include B2B directory listings</span>
+              <span className="block text-xs text-ink-700">
+                Finds listings on TradeKey, EC21, and similar directories the same way — via
+                search results only, never by fetching the directory&apos;s own pages. Adds
+                extra search-provider calls.
+              </span>
+            </span>
+          </label>
+        </div>
+
         <div className="sm:col-span-2 lg:col-span-3">
           <button
             type="submit"
@@ -235,19 +364,27 @@ export default function Discover() {
             </div>
           )}
 
+          <div className="rounded-lg border border-brass-500/30 bg-brass-500/10 px-4 py-3 text-sm text-brass-300">
+            <strong className="font-semibold">Nothing is saved yet.</strong> These results are a
+            preview — click <strong>Save</strong> on a row, or <strong>Save All</strong> below, to
+            add companies to your Companies list.
+          </div>
+
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div className="rounded-lg border border-base-700 bg-base-850 px-4 py-3">
               <div className="text-xs uppercase tracking-wide text-ink-700">Total found</div>
               <div className="text-xl font-semibold text-ink-100">{result.result_count}</div>
             </div>
             <div className="rounded-lg border border-base-700 bg-base-850 px-4 py-3">
-              <div className="text-xs uppercase tracking-wide text-ink-700">New companies</div>
+              <div className="text-xs uppercase tracking-wide text-ink-700">Not yet saved</div>
               <div className="text-xl font-semibold text-status-high">
                 {result.new_company_count}
               </div>
             </div>
             <div className="rounded-lg border border-base-700 bg-base-850 px-4 py-3">
-              <div className="text-xs uppercase tracking-wide text-ink-700">Matched existing</div>
+              <div className="text-xs uppercase tracking-wide text-ink-700">
+                Already in your companies
+              </div>
               <div className="text-xl font-semibold text-ink-300">{result.duplicate_count}</div>
             </div>
           </div>
@@ -258,10 +395,26 @@ export default function Discover() {
             minRelevance={minRelevance}
             onMinRelevanceChange={setMinRelevance}
             total={filteredCompanies.length}
+            extra={
+              <button
+                type="button"
+                onClick={handleSaveAll}
+                disabled={savingAll || unsavedCount === 0}
+                className="rounded-md bg-brass-500 px-4 py-1.5 text-xs font-semibold text-base-950 transition-colors hover:bg-brass-400 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {savingAll
+                  ? "Saving..."
+                  : unsavedCount === 0
+                    ? "All saved"
+                    : `Save All (${unsavedCount})`}
+              </button>
+            }
           />
 
-          <CompanyTable
+          <PreviewResultsTable
             companies={filteredCompanies}
+            savedState={savedState}
+            onSave={handleSaveOne}
             emptyMessage="No companies match the current filters."
           />
         </div>

@@ -1,10 +1,12 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import Logo from "./Logo";
+import { useAuth } from "../context/AuthContext";
 
 const NAV_ITEMS = [
   { to: "/", label: "Dashboard", end: true },
   { to: "/discover", label: "Discover Companies" },
   { to: "/companies", label: "Companies" },
+  { to: "/emails", label: "Emails" },
   { to: "/searches", label: "Search History" },
   { to: "/scheduled", label: "Scheduled Searches" },
   { to: "/settings", label: "Settings" },
@@ -29,24 +31,43 @@ function NavItem({ to, label, end }) {
 }
 
 export default function Layout() {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+
+  const navItems = user?.is_admin
+    ? [...NAV_ITEMS, { to: "/admin/users", label: "Users" }]
+    : NAV_ITEMS;
+
+  function handleLogout() {
+    logout();
+    navigate("/login", { replace: true });
+  }
+
   return (
     <div className="min-h-screen bg-base-900">
       <header className="sticky top-0 z-30 border-b border-base-700 bg-base-900/95 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-6 px-4 sm:px-6 lg:px-8">
           <Logo />
           <nav className="hidden items-center gap-1 md:flex">
-            {NAV_ITEMS.map((item) => (
+            {navItems.map((item) => (
               <NavItem key={item.to} {...item} />
             ))}
           </nav>
           <div className="flex items-center gap-3">
-            <span className="hidden rounded-full border border-base-600 px-3 py-1 text-xs font-medium text-ink-500 sm:inline">
-              Phase 1 · Company Discovery
+            <span className="hidden max-w-[12rem] truncate text-sm text-ink-500 sm:inline">
+              {user?.full_name || user?.email}
             </span>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="rounded-md border border-base-600 px-3 py-1.5 text-xs font-medium text-ink-300 hover:border-status-danger hover:text-status-danger"
+            >
+              Log out
+            </button>
           </div>
         </div>
         <nav className="flex items-center gap-1 overflow-x-auto border-t border-base-800 px-4 py-2 md:hidden">
-          {NAV_ITEMS.map((item) => (
+          {navItems.map((item) => (
             <NavItem key={item.to} {...item} />
           ))}
         </nav>

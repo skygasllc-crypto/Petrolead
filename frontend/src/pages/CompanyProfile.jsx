@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import RelevanceBadge from "../components/RelevanceBadge";
 import ErrorBanner from "../components/ErrorBanner";
+import { sourceLabel } from "../lib/constants";
 
 function Section({ title, children }) {
   return (
@@ -151,6 +152,14 @@ export default function CompanyProfile() {
               {[company.city, company.country, company.region].filter(Boolean).join(", ") ||
                 "Location unknown"}
             </p>
+            {company.exported_at && (
+              <span
+                className="mt-2 inline-block rounded-full border border-status-relevant/30 bg-status-relevant/15 px-2.5 py-0.5 text-[10px] font-medium text-status-relevant"
+                title={new Date(company.exported_at).toLocaleString()}
+              >
+                Exported {new Date(company.exported_at).toLocaleDateString()}
+              </span>
+            )}
           </div>
           <RelevanceBadge score={company.relevance_score} size="lg" />
         </div>
@@ -220,9 +229,7 @@ export default function CompanyProfile() {
                 {company.sources.map((s, i) => (
                   <li key={i} className="flex flex-col gap-1 py-3 first:pt-0 last:pb-0">
                     <div className="flex items-center justify-between text-sm">
-                      <span className="font-medium capitalize text-ink-100">
-                        {s.source.replace(/^search:/, "").replace(/_/g, " ")}
-                      </span>
+                      <span className="font-medium text-ink-100">{sourceLabel(s.source)}</span>
                       <span className="text-xs text-ink-700">
                         {new Date(s.discovered_at).toLocaleDateString()}
                       </span>
@@ -248,6 +255,20 @@ export default function CompanyProfile() {
           <Section title="Keywords">
             <TagList items={company.keywords} empty="No keywords recorded." />
           </Section>
+
+          {company.contact?.contact_person_name && (
+            <Section title="Contact Person">
+              <p className="text-sm font-medium text-ink-100">
+                {company.contact.contact_person_name}
+                {company.contact.contact_person_title && (
+                  <span className="font-normal text-ink-500">
+                    {" "}
+                    — {company.contact.contact_person_title}
+                  </span>
+                )}
+              </p>
+            </Section>
+          )}
 
           <Section title="Contact Page">
             {company.contact?.contact_page_url ? (

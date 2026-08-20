@@ -8,11 +8,13 @@ Phase 1 explicitly avoids depending on Celery/Redis being present).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from sqlalchemy import String, cast, func, select
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.database.models import (
     Company,
     CompanyContact,
@@ -26,14 +28,29 @@ from app.database.models import (
     utcnow,
 )
 from app.discovery.deduplicator import find_match, is_confident_match
+from app.discovery.email_finder import find_person_email
 from app.discovery.lead_scoring import compute_lead_score
 from app.discovery.normalizer import extract_domain, normalize_company_name
+from app.discovery.profile_lookup import (
+    build_profile_snippet_query,
+    detect_personal_profile_platform,
+    parse_profile_snippet,
+)
 from app.discovery.relevance import score_relevance
-from app.discovery.sources import SearchSource
+from app.discovery.search import B2B_DIRECTORY_DOMAINS, get_search_provider
+from app.discovery.sources import B2BSource, SearchSource, SocialSource, WebsiteSource
 from app.discovery.types import DiscoveredCompany, DiscoveryRequest
 from app.schemas import DiscoverRequestSchema
 
 logger = logging.getLogger("petrolead.services.company")
+
+
+class UrlLookupError(Exception):
+    """Raised when a pasted URL couldn't be fetched or yielded nothing usable."""
+
+
+class CompanySaveError(Exception):
+    """Raised when a previewed candidate couldn't be persisted."""
 
 
 def _to_discovery_request(payload: DiscoverRequestSchema) -> DiscoveryRequest:
@@ -46,6 +63,8 @@ def _to_discovery_request(payload: DiscoverRequestSchema) -> DiscoveryRequest:
         products=list(payload.products),
         keywords=list(payload.keywords),
         limit=payload.limit,
+        include_social_search=payload.include_social_search,
+        include_b2b_directories=payload.include_b2b_directories,
     )
 
 
@@ -82,6 +101,16 @@ def _apply_contact_info(db: Session, company: Company, candidate: DiscoveredComp
         elif not company.contact.contact_page_url:
             company.contact.contact_page_url = candidate.contact_page_url
 
+    if candidate.contact_person_name:
+        if company.contact is None:
+            company.contact = CompanyContact(
+                contact_person_name=candidate.contact_person_name,
+                contact_person_title=candidate.contact_person_title,
+            )
+        elif not company.contact.contact_person_name:
+            company.contact.contact_person_name = candidate.contact_person_name
+            company.contact.contact_person_title = candidate.contact_person_title
+
     existing_platforms = {p.platform for p in company.social_profiles}
     for profile in candidate.social_profiles:
         platform = profile.get("platform")
@@ -93,14 +122,24 @@ def _apply_contact_info(db: Session, company: Company, candidate: DiscoveredComp
 
 
 def _apply_email_phone_info(company: Company, candidate: DiscoveredCompany) -> None:
-    """Persist newly-seen emails/phones (Phase 3/4). Idempotent per company."""
-    existing_emails = {e.email.lower() for e in company.emails}
-    for entry in candidate.emails:
-        email = entry.get("email")
-        if not email or email.lower() in existing_emails:
-            continue
-        company.emails.append(CompanyEmail(email=email, is_valid=entry.get("is_valid")))
-        existing_emails.add(email.lower())
+    """Persist newly-seen emails/phones (Phase 3/4).
+
+    Emails are finalized on first extraction: once a company has at least
+    one email on file, later discovery runs that re-match this company
+    never touch its emails again — not re-added, not re-validated, not
+    replaced. This keeps a company's email list stable across repeat
+    searches instead of re-extracting (and potentially flip-flopping
+    validity) every time the same company is rediscovered. Phones aren't
+    finalized this way; they still accumulate newly-seen numbers.
+    """
+    if not company.emails:
+        existing_emails: set[str] = set()
+        for entry in candidate.emails:
+            email = entry.get("email")
+            if not email or email.lower() in existing_emails:
+                continue
+            company.emails.append(CompanyEmail(email=email, is_valid=entry.get("is_valid")))
+            existing_emails.add(email.lower())
 
     existing_phones = {p.phone for p in company.phones}
     for entry in candidate.phones:
@@ -208,23 +247,165 @@ def _merge_into_company(
     )
 
 
-async def run_discovery(db: Session, payload: DiscoverRequestSchema) -> SearchQuery:
-    """Execute a full discovery job synchronously and persist the results."""
-    search_query = SearchQuery(
-        region=payload.region,
-        country=payload.country,
-        city=payload.city,
-        industry=payload.industry,
-        activity=payload.activity,
-        products=payload.products,
-        keywords=payload.keywords,
-        result_limit=payload.limit,
-        status=SearchStatus.RUNNING,
-    )
-    db.add(search_query)
-    db.commit()
-    db.refresh(search_query)
+def _persist_candidate(
+    db: Session, candidate: DiscoveredCompany, *, context: str
+) -> tuple[Company | None, bool]:
+    """Dedup + create-or-merge one candidate. Returns (company, is_new).
 
+    Returns (None, False) if the candidate was unusable (no name) or
+    persistence failed — callers just skip it, same as any other
+    single-candidate failure never aborting the whole job.
+    """
+    if not candidate.company_name or not candidate.company_name.strip():
+        return None, False
+    try:
+        match = find_match(db, candidate)
+        if is_confident_match(match):
+            _merge_into_company(db, match.company, candidate, match.confidence)
+            return match.company, False
+        company = _create_company(db, candidate)
+        return company, True
+    except Exception:
+        logger.exception(
+            "%s: failed to persist candidate %r — skipping", context, candidate.company_name
+        )
+        db.rollback()
+        return None, False
+
+
+def _score_candidate(candidate: DiscoveredCompany) -> tuple[int, int]:
+    """Relevance + lead score for a not-yet-saved candidate (preview only).
+
+    Mirrors `_apply_relevance`/`_apply_lead_score`, just computed off the
+    transient `DiscoveredCompany` instead of a persisted `Company` row —
+    nothing here touches the database.
+    """
+    relevance = score_relevance(
+        company_name=candidate.company_name,
+        description=candidate.description,
+        activities=candidate.activities,
+        products=candidate.products,
+        keywords=candidate.keywords,
+        industry=candidate.industry,
+    )
+    lead = compute_lead_score(
+        relevance_score=relevance.score,
+        has_website=bool(candidate.website),
+        has_contact_page=bool(candidate.contact_page_url),
+        has_social_profile=len(candidate.social_profiles) > 0,
+        has_verified_email=any(e.get("is_valid") for e in candidate.emails),
+        has_verified_phone=any(p.get("is_valid") for p in candidate.phones),
+    )
+    return relevance.score, lead.score
+
+
+def _merge_candidates_in_memory(candidates: list[DiscoveredCompany]) -> list[DiscoveredCompany]:
+    """Collapse obvious duplicate candidates within one preview batch.
+
+    Preview mode never touches the database, so `find_match` (which only
+    matches against already-saved companies) can't catch two candidates
+    in the *same* batch describing the same company — e.g. the base web
+    search and the B2B/social connectors both surfacing "ABC Petroleum".
+    This applies the same domain/name+location matching signals purely
+    in memory, merging their data the same way `_merge_into_company`
+    would on save, so a preview doesn't show obvious duplicate rows.
+    """
+    merged: list[DiscoveredCompany] = []
+    domain_index: dict[str, int] = {}
+    name_location_index: dict[tuple[str, str | None], int] = {}
+
+    for candidate in candidates:
+        if not candidate.company_name or not candidate.company_name.strip():
+            continue
+
+        domain = extract_domain(candidate.website)
+        normalized = normalize_company_name(candidate.company_name)
+        location_key = (normalized, (candidate.country or "").strip().lower() or None)
+
+        target_idx = domain_index.get(domain) if domain else None
+        if target_idx is None:
+            target_idx = name_location_index.get(location_key)
+
+        if target_idx is not None:
+            existing = merged[target_idx]
+            existing.activities = _union(existing.activities, candidate.activities)
+            existing.products = _union(existing.products, candidate.products)
+            existing.keywords = _union(existing.keywords, candidate.keywords)
+            if not existing.website and candidate.website:
+                existing.website = candidate.website
+            if not existing.description and candidate.description:
+                existing.description = candidate.description
+            if not existing.contact_page_url and candidate.contact_page_url:
+                existing.contact_page_url = candidate.contact_page_url
+
+            seen_platforms = {p["platform"] for p in existing.social_profiles}
+            existing.social_profiles += [
+                p for p in candidate.social_profiles if p["platform"] not in seen_platforms
+            ]
+            seen_emails = {e["email"].lower() for e in existing.emails if e.get("email")}
+            existing.emails += [
+                e
+                for e in candidate.emails
+                if e.get("email") and e["email"].lower() not in seen_emails
+            ]
+            seen_phones = {p["phone"] for p in existing.phones if p.get("phone")}
+            existing.phones += [
+                p for p in candidate.phones if p.get("phone") and p["phone"] not in seen_phones
+            ]
+            continue
+
+        idx = len(merged)
+        merged.append(candidate)
+        if domain:
+            domain_index[domain] = idx
+        name_location_index[location_key] = idx
+
+    return merged
+
+
+def _build_preview(db: Session, candidate: DiscoveredCompany) -> dict:
+    """Score a candidate and check whether it matches an already-saved
+    company, without writing anything — the shape returned to the API for
+    both `/discover` and `/discover-url` previews."""
+    relevance_score, lead_score = _score_candidate(candidate)
+    match = find_match(db, candidate)
+    already_saved = is_confident_match(match)
+
+    return {
+        "company_name": candidate.company_name,
+        "website": candidate.website,
+        "country": candidate.country,
+        "city": candidate.city,
+        "region": candidate.region,
+        "industry": candidate.industry,
+        "description": candidate.description,
+        "activities": candidate.activities,
+        "products": candidate.products,
+        "keywords": candidate.keywords,
+        "source": candidate.source,
+        "source_url": candidate.source_url,
+        "is_mock": candidate.is_mock,
+        "contact_page_url": candidate.contact_page_url,
+        "social_profiles": candidate.social_profiles,
+        "emails": candidate.emails,
+        "phones": candidate.phones,
+        "contact_person_name": candidate.contact_person_name,
+        "contact_person_title": candidate.contact_person_title,
+        "relevance_score": relevance_score,
+        "lead_score": lead_score,
+        "already_saved": already_saved,
+        "existing_company_id": match.company.id if already_saved and match.company else None,
+    }
+
+
+async def _execute_sources(
+    db: Session, search_query: SearchQuery, payload: DiscoverRequestSchema
+) -> list[DiscoveredCompany] | None:
+    """Run the configured sources for one search. Returns None (and marks
+    `search_query` FAILED) if the sources themselves raised — a per-source
+    failure inside `SearchSource.discover()` etc. is already caught there
+    and just yields fewer candidates, so reaching an exception here means
+    something more fundamental broke (e.g. a misconfigured provider)."""
     logger.info(
         "Search %s started: region=%s country=%s city=%s industry=%s products=%s keywords=%s",
         search_query.id,
@@ -237,10 +418,15 @@ async def run_discovery(db: Session, payload: DiscoverRequestSchema) -> SearchQu
     )
 
     discovery_request = _to_discovery_request(payload)
-    source = SearchSource()
+    sources: list[SearchSource | B2BSource | SocialSource] = [SearchSource()]
+    if discovery_request.include_social_search:
+        sources.append(SocialSource())
+    if discovery_request.include_b2b_directories:
+        sources.append(B2BSource())
 
     try:
-        candidates = await source.discover(discovery_request)
+        candidate_lists = await asyncio.gather(*(s.discover(discovery_request) for s in sources))
+        return [candidate for batch in candidate_lists for candidate in batch]
     except Exception as exc:  # noqa: BLE001 — a failed job must not crash the API
         logger.exception("Search %s failed during discovery", search_query.id)
         search_query.status = SearchStatus.FAILED
@@ -249,6 +435,87 @@ async def run_discovery(db: Session, payload: DiscoverRequestSchema) -> SearchQu
         search_query.completed_at = utcnow()
         db.commit()
         db.refresh(search_query)
+        return None
+
+
+def _new_search_query(payload: DiscoverRequestSchema) -> SearchQuery:
+    return SearchQuery(
+        region=payload.region,
+        country=payload.country,
+        city=payload.city,
+        industry=payload.industry,
+        activity=payload.activity,
+        products=payload.products,
+        keywords=payload.keywords,
+        result_limit=payload.limit,
+        status=SearchStatus.RUNNING,
+    )
+
+
+async def discover_preview(
+    db: Session, payload: DiscoverRequestSchema
+) -> tuple[SearchQuery, list[dict]]:
+    """Run a discovery search WITHOUT saving anything (the interactive
+    Discover page / paste-a-link flow) — the user reviews results and
+    explicitly saves the ones they want via `save_candidate`.
+
+    `SearchQuery.new_company_count`/`duplicate_count` here mean "would be
+    new" / "already in your saved companies" at preview time, not actual
+    save outcomes — saving can still change since the database can move
+    between preview and save.
+    """
+    search_query = _new_search_query(payload)
+    db.add(search_query)
+    db.commit()
+    db.refresh(search_query)
+
+    candidates = await _execute_sources(db, search_query, payload)
+    if candidates is None:
+        return search_query, []
+
+    candidates = _merge_candidates_in_memory(candidates)
+    logger.info("Search %s: %d candidate(s) previewed, not saved", search_query.id, len(candidates))
+
+    previews = [_build_preview(db, c) for c in candidates if c.company_name.strip()]
+    new_count = sum(1 for p in previews if not p["already_saved"])
+    duplicate_count = len(previews) - new_count
+
+    search_query.status = SearchStatus.COMPLETED
+    search_query.result_count = len(previews)
+    search_query.new_company_count = new_count
+    search_query.duplicate_count = duplicate_count
+    search_query.status_message = (
+        f"Found {len(previews)} result(s): {new_count} not yet saved, "
+        f"{duplicate_count} already in your companies."
+    )
+    search_query.completed_at = utcnow()
+    db.commit()
+    db.refresh(search_query)
+
+    logger.info(
+        "Search %s completed: %d previewed, %d already saved",
+        search_query.id,
+        new_count,
+        duplicate_count,
+    )
+    return search_query, previews
+
+
+async def run_discovery(db: Session, payload: DiscoverRequestSchema) -> SearchQuery:
+    """Execute a full discovery job AND immediately persist the results.
+
+    Used only by scheduled/automated searches (Phase 10) — there's no
+    user present to review and click Save on an unattended run, so those
+    save straight through. Interactive discovery goes through
+    `discover_preview` + `save_candidate` instead.
+    """
+    search_query = _new_search_query(payload)
+    db.add(search_query)
+    db.commit()
+    db.refresh(search_query)
+
+    candidates = await _execute_sources(db, search_query, payload)
+    if candidates is None:
         return search_query
 
     logger.info(
@@ -260,26 +527,14 @@ async def run_discovery(db: Session, payload: DiscoverRequestSchema) -> SearchQu
     result_companies: list[Company] = []
 
     for candidate in candidates:
-        if not candidate.company_name or not candidate.company_name.strip():
+        company, is_new = _persist_candidate(db, candidate, context=f"Search {search_query.id}")
+        if company is None:
             continue
-        try:
-            match = find_match(db, candidate)
-            if is_confident_match(match):
-                _merge_into_company(db, match.company, candidate, match.confidence)
-                duplicate_count += 1
-                result_companies.append(match.company)
-            else:
-                company = _create_company(db, candidate)
-                new_count += 1
-                result_companies.append(company)
-        except Exception:
-            logger.exception(
-                "Search %s: failed to persist candidate %r — skipping",
-                search_query.id,
-                candidate.company_name,
-            )
-            db.rollback()
-            continue
+        result_companies.append(company)
+        if is_new:
+            new_count += 1
+        else:
+            duplicate_count += 1
 
     search_query.status = SearchStatus.COMPLETED
     search_query.result_count = len(candidates)
@@ -305,6 +560,268 @@ async def run_discovery(db: Session, payload: DiscoverRequestSchema) -> SearchQu
     return search_query
 
 
+_NOTHING_USABLE_MESSAGE = (
+    "Could not fetch this page, or it didn't publish any usable "
+    "information (a name, description, contact page, or business "
+    "email/phone). This is common for social-media profile URLs, "
+    "which are usually login-gated — try the company's own website "
+    "instead."
+)
+
+
+async def discover_from_url_preview(db: Session, url: str) -> dict:
+    """Fetch one pasted URL and preview whatever public contact info is
+    there, WITHOUT saving it — same "review then save" flow as
+    `discover_preview`.
+
+    A personal profile URL (`linkedin.com/in/...`) is routed to
+    `_preview_from_profile_snippet` instead — that page is login-gated, so
+    it's never fetched directly. Everything else reuses `WebsiteSource`
+    (Phase 1) end to end — a plain, respectful page fetch of the URL and,
+    if found, its Contact page. Works well for a company's own website. A
+    raw *company* social-platform URL (a LinkedIn/Facebook page, not a
+    person) will usually come back empty here too: those are also
+    login-gated, and this never bypasses that — see `discovery/extractor.py`.
+    """
+    profile_platform = detect_personal_profile_platform(url)
+    if profile_platform:
+        return await _preview_from_profile_snippet(db, url, platform=profile_platform)
+
+    candidates = await WebsiteSource(url).discover(DiscoveryRequest())
+    candidate = candidates[0]
+
+    learned_anything = bool(
+        candidate.company_name != candidate.website
+        or candidate.description
+        or candidate.contact_page_url
+        or candidate.social_profiles
+        or candidate.emails
+        or candidate.phones
+    )
+    if not learned_anything:
+        raise UrlLookupError(_NOTHING_USABLE_MESSAGE)
+
+    preview = _build_preview(db, candidate)
+    logger.info("URL lookup %s previewed as %r (not saved)", url, candidate.company_name)
+    return preview
+
+
+_BLOCKED_DOMAIN_SUBSTRINGS = {
+    "linkedin.com",
+    "facebook.com",
+    "twitter.com",
+    "x.com",
+    "instagram.com",
+    *B2B_DIRECTORY_DOMAINS,
+}
+
+
+async def _resolve_company_domain(provider, company_name: str) -> str | None:
+    """Best-effort: the likely official website domain for a company name,
+    taken only from an actual search-engine result — never guessed, and
+    never a known social-platform or B2B-directory host (those aren't a
+    company's own site)."""
+    try:
+        results = await provider.search(f'"{company_name}" official website', limit=3)
+    except Exception:
+        logger.warning("Domain resolution search failed for company=%r", company_name)
+        return None
+
+    for result in results:
+        domain = extract_domain(result.url)
+        if not domain or any(blocked in domain for blocked in _BLOCKED_DOMAIN_SUBSTRINGS):
+            continue
+        return domain
+    return None
+
+
+async def _resolve_domain_and_email(
+    provider, settings, *, company_name: str, full_name: str
+) -> tuple[str | None, list[dict]]:
+    """Shared best-effort enrichment used by both the profile-snippet
+    fallback and bulk contact lookup: resolve a company's domain via an
+    actual search result, then (if `HUNTER_IO_API_KEY` is configured) ask
+    Hunter.io for a confident business email for this specific person.
+    Skipped entirely in mock mode — never fabricates either value."""
+    if provider.name == "mock":
+        return None, []
+    domain = await _resolve_company_domain(provider, company_name)
+    if not domain:
+        return None, []
+    found = await find_person_email(domain=domain, full_name=full_name, settings=settings)
+    return domain, ([found] if found else [])
+
+
+async def _preview_from_profile_snippet(db: Session, url: str, *, platform: str) -> dict:
+    """Fallback for a personal social-profile URL: the page itself is
+    login-gated and never fetched. Instead, ask the configured
+    `SearchProvider` for whatever public snippet it has indexed for that
+    exact URL (same trust model as `SocialSource`), and parse a
+    name/title/company out of it if there is one.
+
+    Only succeeds when a company can be identified — without one, there's
+    nowhere meaningful to attach the person's name/title (this app has no
+    standalone "person" record, only companies with an optional named
+    contact), so it fails the same way an unfetchable page does.
+    """
+    settings = get_settings()
+    provider = get_search_provider(settings)
+    query = build_profile_snippet_query(url)
+
+    try:
+        results = await provider.search(query, limit=3)
+    except Exception:
+        logger.warning("Profile snippet lookup failed for url=%r", url, exc_info=True)
+        results = []
+
+    parsed = None
+    for result in results:
+        parsed = parse_profile_snippet(result.title)
+        if parsed and parsed.company_name:
+            break
+        parsed = None
+
+    if parsed is None:
+        raise UrlLookupError(_NOTHING_USABLE_MESSAGE)
+
+    domain, emails = await _resolve_domain_and_email(
+        provider, settings, company_name=parsed.company_name, full_name=parsed.name
+    )
+
+    candidate = DiscoveredCompany(
+        company_name=parsed.company_name,
+        website=f"https://{domain}" if domain else None,
+        source=f"social_snippet:{provider.name}",
+        source_url=url,
+        is_mock=provider.name == "mock",
+        social_profiles=[{"platform": platform, "url": url}],
+        contact_person_name=parsed.name,
+        contact_person_title=parsed.title,
+        emails=emails,
+    )
+    preview = _build_preview(db, candidate)
+    logger.info(
+        "Profile snippet lookup %s previewed contact=%r at company=%r (not saved)",
+        url,
+        parsed.name,
+        parsed.company_name,
+    )
+    return preview
+
+
+async def _preview_from_name_and_company(db: Session, *, full_name: str, company_name: str) -> dict:
+    """Bulk-lookup path for an item given as a plain name + company (no
+    profile URL to derive them from) — goes straight to the same
+    domain-resolution + Hunter.io enrichment the profile-snippet fallback
+    uses. Always "succeeds" with at least the name/company as given, even
+    when no domain/email could be resolved — enrichment failing is not the
+    same as the lookup failing, same as the URL-based path."""
+    settings = get_settings()
+    provider = get_search_provider(settings)
+    domain, emails = await _resolve_domain_and_email(
+        provider, settings, company_name=company_name, full_name=full_name
+    )
+
+    candidate = DiscoveredCompany(
+        company_name=company_name,
+        website=f"https://{domain}" if domain else None,
+        source=f"bulk_lookup:{provider.name}",
+        is_mock=provider.name == "mock",
+        contact_person_name=full_name,
+        emails=emails,
+    )
+    preview = _build_preview(db, candidate)
+    logger.info(
+        "Bulk lookup previewed contact=%r at company=%r (not saved)", full_name, company_name
+    )
+    return preview
+
+
+async def bulk_contact_lookup_preview(db: Session, items: list) -> list[dict]:
+    """Look up several people at once — each item is either a LinkedIn
+    profile URL (routed through the exact same logic as a single "paste a
+    link" lookup) or a plain name + company pair. Every item is resolved
+    independently and concurrently; one item failing (e.g. an unreachable
+    URL) never affects the others. Preview only, same as everywhere else —
+    nothing here writes to the database.
+    """
+
+    async def _resolve_one(item) -> dict:
+        try:
+            if item.url is not None:
+                preview = await discover_from_url_preview(db, str(item.url))
+            else:
+                preview = await _preview_from_name_and_company(
+                    db, full_name=item.full_name, company_name=item.company_name
+                )
+            return {"item": item, "success": True, "error": None, "preview": preview}
+        except UrlLookupError as exc:
+            return {"item": item, "success": False, "error": str(exc), "preview": None}
+
+    return list(await asyncio.gather(*(_resolve_one(item) for item in items)))
+
+
+def _preview_payload_to_candidate(payload) -> DiscoveredCompany:
+    """Convert a `SaveCompanyRequestSchema` (the client echoing back a
+    preview it wants saved) into a `DiscoveredCompany` for persistence."""
+    return DiscoveredCompany(
+        company_name=payload.company_name,
+        website=payload.website,
+        country=payload.country,
+        city=payload.city,
+        region=payload.region,
+        industry=payload.industry,
+        description=payload.description,
+        activities=list(payload.activities),
+        products=list(payload.products),
+        keywords=list(payload.keywords),
+        source=payload.source,
+        source_url=payload.source_url,
+        is_mock=payload.is_mock,
+        contact_page_url=payload.contact_page_url,
+        social_profiles=[p.model_dump() for p in payload.social_profiles],
+        emails=[e.model_dump() for e in payload.emails],
+        phones=[p.model_dump() for p in payload.phones],
+        contact_person_name=payload.contact_person_name,
+        contact_person_title=payload.contact_person_title,
+    )
+
+
+def save_candidate(db: Session, payload) -> Company:
+    """Persist one previewed (not-yet-saved) candidate — the explicit
+    "Save" action. Goes through the exact same dedup/merge logic as
+    automated saves, so saving something that already exists just merges
+    into it rather than creating a duplicate."""
+    candidate = _preview_payload_to_candidate(payload)
+    company, _ = _persist_candidate(db, candidate, context="manual save")
+    if company is None:
+        raise CompanySaveError("Could not save this company. Please try again.")
+    db.commit()
+    db.refresh(company)
+    return company
+
+
+def save_candidates_bulk(db: Session, payloads: list) -> tuple[list[Company], int, int]:
+    """Persist several previewed candidates at once ("Save All")."""
+    new_count = 0
+    duplicate_count = 0
+    saved: list[Company] = []
+    for payload in payloads:
+        candidate = _preview_payload_to_candidate(payload)
+        company, is_new = _persist_candidate(db, candidate, context="bulk save")
+        if company is None:
+            continue
+        saved.append(company)
+        if is_new:
+            new_count += 1
+        else:
+            duplicate_count += 1
+    db.commit()
+    for company in saved:
+        db.refresh(company)
+    return saved, new_count, duplicate_count
+
+
 def _filtered_companies_stmt(
     *,
     country: str | None = None,
@@ -315,6 +832,7 @@ def _filtered_companies_stmt(
     min_lead_score: int | None = None,
     has_email: bool | None = None,
     has_phone: bool | None = None,
+    has_exported: bool | None = None,
     search: str | None = None,
 ):
     """Shared WHERE-clause builder for `list_companies` and `export_companies`.
@@ -346,6 +864,10 @@ def _filtered_companies_stmt(
         stmt = stmt.where(Company.phones.any())
     elif has_phone is False:
         stmt = stmt.where(~Company.phones.any())
+    if has_exported is True:
+        stmt = stmt.where(Company.exported_at.isnot(None))
+    elif has_exported is False:
+        stmt = stmt.where(Company.exported_at.is_(None))
     if search:
         like = f"%{search.strip().lower()}%"
         stmt = stmt.where(Company.normalized_name.like(like))
@@ -363,6 +885,7 @@ def list_companies(
     min_lead_score: int | None = None,
     has_email: bool | None = None,
     has_phone: bool | None = None,
+    has_exported: bool | None = None,
     search: str | None = None,
     page: int = 1,
     page_size: int = 25,
@@ -376,6 +899,7 @@ def list_companies(
         min_lead_score=min_lead_score,
         has_email=has_email,
         has_phone=has_phone,
+        has_exported=has_exported,
         search=search,
     )
 
@@ -406,9 +930,16 @@ def export_companies(
     min_lead_score: int | None = None,
     has_email: bool | None = None,
     has_phone: bool | None = None,
+    has_exported: bool | None = None,
     search: str | None = None,
+    mark_exported: bool = True,
 ) -> list[Company]:
-    """Return every company matching the filters, unpaginated (Phase 8: export)."""
+    """Return every company matching the filters, unpaginated (Phase 8: export).
+
+    `mark_exported=True` (the default) stamps `exported_at` on each
+    returned company — set it `False` for a "preview" call that shouldn't
+    count as an export (none currently do, but keeps the option open).
+    """
     stmt = _filtered_companies_stmt(
         country=country,
         region=region,
@@ -418,10 +949,19 @@ def export_companies(
         min_lead_score=min_lead_score,
         has_email=has_email,
         has_phone=has_phone,
+        has_exported=has_exported,
         search=search,
     ).order_by(Company.relevance_score.desc(), Company.discovered_at.desc())
     stmt = stmt.limit(MAX_EXPORT_ROWS)
-    return list(db.execute(stmt).scalars().all())
+    companies = list(db.execute(stmt).scalars().all())
+
+    if mark_exported and companies:
+        now = utcnow()
+        for company in companies:
+            company.exported_at = now
+        db.commit()
+
+    return companies
 
 
 def to_export_rows(companies: list[Company]) -> list[dict]:
@@ -446,6 +986,7 @@ def to_export_rows(companies: list[Company]) -> list[dict]:
                 "Relevance Score": c.relevance_score,
                 "Lead Score": c.lead_score.score if c.lead_score else "",
                 "Discovery Date": c.discovered_at.isoformat(),
+                "Exported Date": c.exported_at.isoformat() if c.exported_at else "",
             }
         )
     return rows

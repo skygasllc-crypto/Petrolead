@@ -1,3 +1,4 @@
+# ruff: noqa: E402 — env vars below must be set before any `app.*` import.
 from __future__ import annotations
 
 import os
@@ -5,8 +6,22 @@ import os
 # Force an isolated, ephemeral database and mock search provider for the
 # whole test session — must happen before any `app.*` module is imported,
 # since settings are read (and cached) at import time.
-os.environ["DATABASE_URL"] = "sqlite:///./test_petrolead.db"
+#
+# This file-based DB is only ever touched by the app's lifespan
+# (init_db() -> create_all()) — actual test data goes through the
+# in-memory `db_session` fixture below via a dependency override. It
+# still needs a real, working SQLite file though, and this project
+# directory lives on a WSL-mounted Windows drive (/mnt/c), where SQLite
+# intermittently throws "disk I/O error" (see the wsl_sqlite_io_errors
+# memory) — so it's placed on the native filesystem instead of relative
+# to the repo.
+_TEST_DB_PATH = "/tmp/petrolead-test.db"
+os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DB_PATH}"
 os.environ["SEARCH_PROVIDER"] = "mock"
+# Otherwise a developer's local .env ADMIN_EMAILS would leak into test
+# behavior (e.g. an admin test's own dependency-override "current admin"
+# accidentally matching that address) — tests set admin status explicitly.
+os.environ["ADMIN_EMAILS"] = ""
 
 import pytest
 from sqlalchemy import create_engine
@@ -39,7 +54,8 @@ def db_session():
 
 
 @pytest.fixture()
-def client(db_session):
+def unauthenticated_client(db_session):
+    """A TestClient with no Authorization header — for auth tests themselves."""
     from fastapi.testclient import TestClient
 
     def _override_get_db():
@@ -51,9 +67,26 @@ def client(db_session):
     app.dependency_overrides.clear()
 
 
+@pytest.fixture()
+def client(unauthenticated_client):
+    """The default client: a real registered user, pre-authenticated.
+
+    Every endpoint except /api/auth/* and /api/health requires a logged-in
+    user, so most tests (which are about discovery/companies/etc., not
+    auth itself) should default to being authenticated rather than each
+    having to register+log in a user by hand.
+    """
+    response = unauthenticated_client.post(
+        "/api/auth/register",
+        json={"email": "test-user@example.com", "password": "correct-horse-battery"},
+    )
+    token = response.json()["access_token"]
+    unauthenticated_client.headers["Authorization"] = f"Bearer {token}"
+    return unauthenticated_client
+
+
 @pytest.fixture(autouse=True, scope="session")
 def _cleanup_test_db_file():
     yield
-    for path in ("test_petrolead.db",):
-        if os.path.exists(path):
-            os.remove(path)
+    if os.path.exists(_TEST_DB_PATH):
+        os.remove(_TEST_DB_PATH)

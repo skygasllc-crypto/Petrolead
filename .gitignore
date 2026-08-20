@@ -19,8 +19,12 @@ coverage.xml
 
 # Database
 *.db
+*.db-journal
 *.sqlite3
 petrolead.db
+
+# Claude Code harness state
+.claude/
 
 # Logs
 *.log

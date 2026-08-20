@@ -82,3 +82,16 @@ export function relevanceTier(score) {
   if (score >= 30) return { label: "Possible", tone: "possible" };
   return { label: "Low", tone: "low" };
 }
+
+const SOURCE_LABELS = {
+  search: "Web Search",
+  social: "Social Search",
+  b2b_directory: "B2B Directory",
+  website: "Website",
+};
+
+export function sourceLabel(source) {
+  if (!source) return "—";
+  const [prefix] = source.split(":");
+  return SOURCE_LABELS[prefix] || prefix.replace(/_/g, " ");
+}

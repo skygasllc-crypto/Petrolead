@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import RelevanceBadge from "./RelevanceBadge";
+import { sourceLabel } from "../lib/constants";
 
 const COLUMNS = [
   { key: "company_name", label: "Company", sortable: true },
@@ -15,11 +16,6 @@ const COLUMNS = [
 
 function locationOf(company) {
   return [company.city, company.country].filter(Boolean).join(", ") || "—";
-}
-
-function sourceLabel(source) {
-  if (!source) return "—";
-  return source.replace(/^search:/, "").replace(/_/g, " ");
 }
 
 export default function CompanyTable({ companies, emptyMessage = "No companies found." }) {
@@ -91,12 +87,22 @@ export default function CompanyTable({ companies, emptyMessage = "No companies f
               className="border-b border-base-800 last:border-0 hover:bg-base-800/50"
             >
               <td className="px-4 py-3">
-                <Link
-                  to={`/companies/${company.id}`}
-                  className="font-medium text-ink-100 hover:text-brass-400"
-                >
-                  {company.company_name}
-                </Link>
+                <div className="flex items-center gap-2">
+                  <Link
+                    to={`/companies/${company.id}`}
+                    className="font-medium text-ink-100 hover:text-brass-400"
+                  >
+                    {company.company_name}
+                  </Link>
+                  {company.exported_at && (
+                    <span
+                      className="rounded-full border border-status-relevant/30 bg-status-relevant/15 px-1.5 py-0.5 text-[10px] font-medium text-status-relevant"
+                      title={`Exported ${new Date(company.exported_at).toLocaleString()}`}
+                    >
+                      Exported
+                    </span>
+                  )}
+                </div>
               </td>
               <td className="px-4 py-3 text-ink-500">{locationOf(company)}</td>
               <td className="px-4 py-3 text-ink-500">{company.industry || "—"}</td>

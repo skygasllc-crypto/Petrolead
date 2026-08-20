@@ -40,6 +40,31 @@ _INDUSTRY_PHRASES = {
 
 _GENERIC_PETROLEUM_PHRASES = ["petroleum company", "oil trading company", "fuel trading company"]
 
+# Phase 6 (partial): well-known public B2B trade directories. `site:domain`
+# is a standard search-engine operator — it asks the search provider to
+# filter its own already-public index to that domain. It never visits the
+# directory's servers itself; that only happens if/when a human clicks a
+# result. This is why it's safe without per-directory ToS review, and also
+# why `SearchSource` (see sources.py) never treats a directory's listing
+# URL as the company's own website — no page from these domains is ever
+# fetched by this app.
+B2B_DIRECTORY_DOMAINS = [
+    "tradekey.com",
+    "ec21.com",
+    "go4worldbusiness.com",
+    "tradeindia.com",
+    "exportersindia.com",
+    "globalsources.com",
+    "thomasnet.com",
+]
+
+# Phase 5 (partial): social platforms that host structured company pages
+# worth discovering candidates from (as opposed to personal-profile-heavy
+# platforms like Instagram/X, which rarely surface as a "company page" in
+# search results). Same `site:` operator approach and same never-fetch
+# guarantee as B2B_DIRECTORY_DOMAINS above.
+SOCIAL_DISCOVERY_DOMAINS = ["linkedin.com/company", "facebook.com"]
+
 
 class QueryBuilder:
     """Builds a de-duplicated list of search-engine queries for a discovery request."""
@@ -57,7 +82,41 @@ class QueryBuilder:
             for location in location_terms or [""]:
                 queries.append(self._compose(keyword, location))
 
-        # De-duplicate while preserving order.
+        return self._dedupe(queries)
+
+    def build_b2b_directory_queries(self, request: DiscoveryRequest) -> list[str]:
+        """Queries scoped to known B2B directories via `site:` operators.
+
+        Only built when `request.include_b2b_directories` is set — see
+        `DiscoveryRequest` for why this is opt-in rather than automatic.
+        """
+        if not request.include_b2b_directories:
+            return []
+        return self._site_scoped_queries(request, B2B_DIRECTORY_DOMAINS)
+
+    def build_social_queries(self, request: DiscoveryRequest) -> list[str]:
+        """Queries scoped to known social-platform company pages via `site:` operators.
+
+        Only built when `request.include_social_search` is set — see
+        `DiscoveryRequest` for why this is opt-in rather than automatic.
+        """
+        if not request.include_social_search:
+            return []
+        return self._site_scoped_queries(request, SOCIAL_DISCOVERY_DOMAINS)
+
+    def _site_scoped_queries(self, request: DiscoveryRequest, domains: list[str]) -> list[str]:
+        location_terms = self._location_terms(request)
+        subject_phrases = self._subject_phrases(request)[:2]  # keep the query count bounded
+
+        queries: list[str] = []
+        for domain in domains:
+            for phrase, location in itertools.product(subject_phrases, location_terms or [""]):
+                base = self._compose(phrase, location)
+                queries.append(f"site:{domain} {base}")
+        return self._dedupe(queries)
+
+    @staticmethod
+    def _dedupe(queries: list[str]) -> list[str]:
         seen: set[str] = set()
         unique_queries: list[str] = []
         for q in queries:
@@ -225,6 +284,44 @@ class SerpApiProvider(SearchProvider):
         ]
 
 
+class SearchApiIoProvider(SearchProvider):
+    """SearchAPI.io (https://www.searchapi.io/) — hosted Google SERP API.
+
+    Requires SEARCHAPI_IO_API_KEY. Free tier: 100 requests, no credit card
+    required at signup — unlike Google CSE (needs a billing account linked)
+    or Bing (needs an Azure account with a card on file).
+    """
+
+    name = "searchapi_io"
+    ENDPOINT = "https://www.searchapi.io/api/v1/search"
+
+    def __init__(self, settings: Settings):
+        self._api_key = settings.searchapi_io_api_key
+        self._timeout = settings.http_timeout_seconds
+
+    async def search(self, query: str, *, limit: int = 10) -> list[SearchResultItem]:
+        if not self._api_key:
+            raise RuntimeError("SearchAPI.io is not configured (missing API key).")
+
+        params = {"engine": "google", "q": query, "api_key": self._api_key}
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            response = await client.get(self.ENDPOINT, params=params)
+            response.raise_for_status()
+            data = response.json()
+
+        # `num` is no longer honored by the underlying Google SERP (fixed at
+        # 10 results per page as of Sept 2025) — trim to `limit` client-side.
+        items = data.get("organic_results", [])
+        return [
+            SearchResultItem(
+                title=item.get("title", ""),
+                url=item.get("link", ""),
+                snippet=item.get("snippet", ""),
+            )
+            for item in items[:limit]
+        ]
+
+
 class MockSearchProvider(SearchProvider):
     """No-API-key-required provider used for local development and UI testing.
 
@@ -248,7 +345,37 @@ class MockSearchProvider(SearchProvider):
 
     async def search(self, query: str, *, limit: int = 10) -> list[SearchResultItem]:
         logger.info("MockSearchProvider: generating synthetic results for query=%r", query)
-        parts = [p for p in query.split('"') if p.strip()]
+
+        # The personal-LinkedIn-profile snippet fallback (see
+        # `discovery/profile_lookup.py`) queries `site:linkedin.com/in/<slug>`
+        # — synthesize a plausible name/headline snippet for it instead of
+        # falling through to the generic company-name templates below.
+        profile_match = re.search(r"linkedin\.com/in/([a-zA-Z0-9\-_.]+)", query)
+        if profile_match:
+            slug = profile_match.group(1)
+            person_name = " ".join(
+                w.capitalize() for w in re.split(r"[-_.]+", slug) if w
+            ) or "Petroleum Professional"
+            company_name = "Falcon Petroleum Trading"
+            title = f"[MOCK] {person_name} - Senior Trading Manager at {company_name} | LinkedIn"
+            return [
+                SearchResultItem(
+                    title=title,
+                    url=f"https://linkedin.com/in/{slug}",
+                    snippet=(
+                        f"[MOCK DATA] Synthetic LinkedIn profile snippet for query {query!r}. "
+                        "This is not a real person — configure a real SEARCH_PROVIDER to look "
+                        "up actual public profile snippets."
+                    ),
+                )
+            ]
+
+        # B2B/social queries are prefixed with a `site:domain` operator
+        # (unquoted) — strip it so subject/location parsing below still
+        # finds the actual quoted phrase/location, not the operator itself.
+        site_scope = re.match(r"^site:(\S+)\s*", query)
+        unscoped_query = re.sub(r"^site:\S+\s*", "", query)
+        parts = [p for p in unscoped_query.split('"') if p.strip()]
         subject = (parts[0].strip() if parts else "").title() or "Petroleum"
         location = (parts[1].strip() if len(parts) > 1 else "").split()[0].title() if len(
             parts
@@ -258,10 +385,17 @@ class MockSearchProvider(SearchProvider):
         for i, template in enumerate(self._NAME_TEMPLATES[: max(1, min(limit, 5))], start=1):
             name = template.format(subject=subject, loc=location or "Global").strip()
             slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+            # For B2B/social `site:`-scoped queries, host the mock result
+            # under the queried domain itself — SocialSource in particular
+            # only accepts results whose hostname actually matches a known
+            # social domain, same as it would against a real provider.
+            url = f"https://{site_scope.group(1)}/mock-{slug}" if site_scope else (
+                f"https://example-mock-{slug}.test"
+            )
             results.append(
                 SearchResultItem(
                     title=f"[MOCK] {name}",
-                    url=f"https://example-mock-{slug}.test",
+                    url=url,
                     snippet=(
                         f"[MOCK DATA] Synthetic result #{i} generated for query '{query}'. "
                         "This is not a real discovered company — configure a real "
@@ -277,6 +411,7 @@ _PROVIDERS: dict[str, type[SearchProvider]] = {
     "google_cse": GoogleCSEProvider,
     "bing": BingSearchProvider,
     "serpapi": SerpApiProvider,
+    "searchapi_io": SearchApiIoProvider,
     "mock": MockSearchProvider,
 }
 

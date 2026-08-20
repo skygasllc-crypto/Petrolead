@@ -1,3 +1,6 @@
+from tests.helpers import discover_and_save
+
+
 class TestHealthCheck:
     def test_health_check(self, client):
         response = client.get("/api/health")
@@ -42,6 +45,71 @@ class TestDiscoverValidation:
         )
         assert response.status_code == 200
 
+    def test_b2b_and_social_flags_default_off_and_dont_change_source(self, client):
+        response = client.post(
+            "/api/discover", json={"country": "United Arab Emirates", "limit": 10}
+        )
+        sources = {c["source"] for c in response.json()["companies"]}
+        assert sources == {"search:mock"}
+
+    def test_b2b_and_social_flags_are_accepted_and_dont_reduce_results(self, client):
+        # Source-level coverage for what these flags actually surface lives
+        # in test_partial_sources.py. Here we just confirm the discover
+        # endpoint accepts them without erroring and never *shrinks* the
+        # preview: the mock provider generates identical company names
+        # regardless of which source queried for them, so in-memory dedup
+        # legitimately folds most extra-source candidates into the same
+        # companies rather than growing the count — that's correct
+        # behavior, not a bug, so we can't assert a strict increase here.
+        baseline = client.post(
+            "/api/discover", json={"country": "United Arab Emirates", "limit": 25}
+        ).json()
+        with_extras = client.post(
+            "/api/discover",
+            json={
+                "country": "United Arab Emirates",
+                "limit": 25,
+                "include_social_search": True,
+                "include_b2b_directories": True,
+            },
+        ).json()
+        assert with_extras["status"] == "completed"
+        assert with_extras["result_count"] >= baseline["result_count"]
+
+    def test_discover_does_not_save_anything(self, client):
+        """The core behavior this suite guards: results are a preview
+        only. Nothing shows up in /api/companies until explicitly saved."""
+        response = client.post(
+            "/api/discover", json={"country": "United Arab Emirates", "limit": 10}
+        )
+        assert response.status_code == 200
+        assert len(response.json()["companies"]) > 0
+        # None of the preview items have a database id.
+        assert all("id" not in c for c in response.json()["companies"])
+
+        companies = client.get("/api/companies").json()
+        assert companies["total"] == 0
+
+    def test_preview_includes_scores_and_already_saved_flag(self, client):
+        response = client.post(
+            "/api/discover", json={"country": "United Arab Emirates", "limit": 10}
+        )
+        preview = response.json()["companies"][0]
+        assert isinstance(preview["relevance_score"], int)
+        assert isinstance(preview["lead_score"], int)
+        assert preview["already_saved"] is False
+        assert preview["existing_company_id"] is None
+
+    def test_repeat_discovery_flags_already_saved_companies(self, client):
+        discover_and_save(client, {"country": "United Arab Emirates", "limit": 10})
+
+        second = client.post(
+            "/api/discover", json={"country": "United Arab Emirates", "limit": 10}
+        ).json()
+        assert any(c["already_saved"] for c in second["companies"])
+        already_saved = next(c for c in second["companies"] if c["already_saved"])
+        assert already_saved["existing_company_id"] is not None
+
 
 class TestCompaniesEndpoint:
     def test_empty_list_initially(self, client):
@@ -55,18 +123,17 @@ class TestCompaniesEndpoint:
         response = client.get("/api/companies/does-not-exist")
         assert response.status_code == 404
 
-    def test_list_after_discovery(self, client):
-        client.post("/api/discover", json={"country": "United Arab Emirates", "limit": 10})
+    def test_list_after_discovery_and_save(self, client):
+        discover_and_save(client, {"country": "United Arab Emirates", "limit": 10})
         response = client.get("/api/companies")
         assert response.status_code == 200
-        body = response.json()
-        assert body["total"] > 0
+        assert response.json()["total"] > 0
 
     def test_get_company_detail(self, client):
-        discover_response = client.post(
-            "/api/discover", json={"country": "United Arab Emirates", "limit": 10}
+        _, save_response = discover_and_save(
+            client, {"country": "United Arab Emirates", "limit": 10}
         )
-        company_id = discover_response.json()["companies"][0]["id"]
+        company_id = save_response.json()["saved"][0]["id"]
         response = client.get(f"/api/companies/{company_id}")
         assert response.status_code == 200
         body = response.json()
@@ -74,10 +141,10 @@ class TestCompaniesEndpoint:
         assert "sources" in body
 
     def test_mock_discovery_includes_contact_and_social_data(self, client):
-        discover_response = client.post(
-            "/api/discover", json={"country": "United Arab Emirates", "limit": 10}
+        _, save_response = discover_and_save(
+            client, {"country": "United Arab Emirates", "limit": 10}
         )
-        company_id = discover_response.json()["companies"][0]["id"]
+        company_id = save_response.json()["saved"][0]["id"]
         response = client.get(f"/api/companies/{company_id}")
         body = response.json()
         # Mock mode synthesizes clearly-labeled contact/social data so the
@@ -97,11 +164,11 @@ class TestCompaniesEndpoint:
         assert response.status_code == 422
 
     def test_mock_discovery_includes_emails_phones_and_lead_score(self, client):
-        discover_response = client.post(
-            "/api/discover", json={"country": "United Arab Emirates", "limit": 10}
+        discover_response, save_response = discover_and_save(
+            client, {"country": "United Arab Emirates", "limit": 10}
         )
-        company_id = discover_response.json()["companies"][0]["id"]
         assert discover_response.json()["companies"][0]["lead_score"] is not None
+        company_id = save_response.json()["saved"][0]["id"]
 
         response = client.get(f"/api/companies/{company_id}")
         body = response.json()
@@ -110,15 +177,15 @@ class TestCompaniesEndpoint:
         assert body["lead_score_breakdown"]["score"] >= 0
 
     def test_has_email_and_has_phone_filters(self, client):
-        client.post("/api/discover", json={"country": "United Arab Emirates", "limit": 10})
+        discover_and_save(client, {"country": "United Arab Emirates", "limit": 10})
         response = client.get("/api/companies?has_email=true")
         assert response.status_code == 200
         assert response.json()["total"] > 0
 
     def test_product_filter(self, client):
-        client.post(
-            "/api/discover",
-            json={"country": "United Arab Emirates", "products": ["EN590"], "limit": 10},
+        discover_and_save(
+            client,
+            {"country": "United Arab Emirates", "products": ["EN590"], "limit": 10},
         )
         response = client.get("/api/companies?product=EN590")
         assert response.status_code == 200
@@ -129,9 +196,41 @@ class TestCompaniesEndpoint:
         assert response.status_code == 422
 
 
+class TestSaveEndpoints:
+    def test_save_bulk_reports_new_and_duplicate_counts(self, client):
+        discover_response = client.post(
+            "/api/discover", json={"country": "United Arab Emirates", "limit": 10}
+        )
+        companies = discover_response.json()["companies"]
+
+        first_save = client.post("/api/companies/save-bulk", json={"companies": companies})
+        assert first_save.status_code == 200
+        body = first_save.json()
+        assert body["new_count"] > 0
+        assert len(body["saved"]) == body["new_count"] + body["duplicate_count"]
+
+        # Saving the exact same preview data again should merge, not duplicate.
+        second_save = client.post("/api/companies/save-bulk", json={"companies": companies})
+        assert second_save.json()["new_count"] == 0
+
+    def test_save_single_company(self, client):
+        discover_response = client.post(
+            "/api/discover", json={"country": "United Arab Emirates", "limit": 10}
+        )
+        preview = discover_response.json()["companies"][0]
+        response = client.post("/api/companies/save", json=preview)
+        assert response.status_code == 200
+        assert response.json()["company_name"] == preview["company_name"]
+        assert client.get("/api/companies").json()["total"] == 1
+
+    def test_save_rejects_missing_company_name(self, client):
+        response = client.post("/api/companies/save", json={"company_name": ""})
+        assert response.status_code == 422
+
+
 class TestExportEndpoint:
     def test_export_csv(self, client):
-        client.post("/api/discover", json={"country": "United Arab Emirates", "limit": 10})
+        discover_and_save(client, {"country": "United Arab Emirates", "limit": 10})
         response = client.get("/api/companies/export?format=csv")
         assert response.status_code == 200
         assert response.headers["content-type"].startswith("text/csv")
@@ -139,7 +238,7 @@ class TestExportEndpoint:
         assert "attachment" in response.headers["content-disposition"]
 
     def test_export_xlsx(self, client):
-        client.post("/api/discover", json={"country": "United Arab Emirates", "limit": 10})
+        discover_and_save(client, {"country": "United Arab Emirates", "limit": 10})
         response = client.get("/api/companies/export?format=xlsx")
         assert response.status_code == 200
         assert "spreadsheetml" in response.headers["content-type"]

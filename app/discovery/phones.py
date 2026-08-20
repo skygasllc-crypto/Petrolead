@@ -64,25 +64,48 @@ def _digits_key(raw: str) -> str:
     return re.sub(r"[^0-9+]", "", raw)
 
 
-def extract_phone_candidates(soup, text: str) -> list[str]:
-    """Return deduplicated, plausible phone-number strings found on a page."""
+def extract_tel_link_candidates(soup) -> list[str]:
+    """Numbers from explicit `tel:` links only — an unambiguous phone signal
+    from the page author, unlike a bare digit run in plain text."""
     found: list[str] = []
-
     for anchor in soup.find_all("a", href=True):
         href = anchor["href"].strip()
         if href.lower().startswith("tel:"):
             number = href[len("tel:") :].strip()
             if number:
                 found.append(number)
+    return _dedupe_by_digits(found)
 
+
+def extract_phone_text_candidates(text: str) -> list[str]:
+    """Loose plaintext candidates. Real pages contain plenty of non-phone
+    digit runs (dates, version numbers, code samples) that happen to match
+    this pattern — callers MUST run these through `validate_phone` and drop
+    anything that doesn't come back valid; don't surface them as-is."""
+    found: list[str] = []
     for match in PHONE_CANDIDATE_RE.findall(text or ""):
         digits_only = re.sub(r"[^0-9]", "", match)
         if len(digits_only) >= 7:
             found.append(match.strip())
+    return _dedupe_by_digits(found)
 
+
+def extract_phone_candidates(soup, text: str) -> list[str]:
+    """Convenience: every candidate (`tel:` links + plaintext), deduplicated.
+
+    Kept for callers that just want "everything that might be a phone
+    number" (e.g. tests). Production extraction (`extractor.py`) calls the
+    two sources above separately so it can trust `tel:` links unconditionally
+    while requiring plaintext matches to pass real validation.
+    """
+    combined = extract_tel_link_candidates(soup) + extract_phone_text_candidates(text)
+    return _dedupe_by_digits(combined)
+
+
+def _dedupe_by_digits(candidates: list[str]) -> list[str]:
     seen: set[str] = set()
     unique: list[str] = []
-    for candidate in found:
+    for candidate in candidates:
         key = _digits_key(candidate)
         if key and key not in seen:
             seen.add(key)

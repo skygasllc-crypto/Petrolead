@@ -26,6 +26,15 @@ class DiscoveryRequest:
     keywords: list[str] = field(default_factory=list)
     limit: int = 25
 
+    # Phase 5/6 (partial): also run search queries targeted at known
+    # social-platform company pages / B2B trade-directory listings via
+    # `site:` operators. Both opt-in — they add extra search-provider
+    # calls, which cost quota/money on real providers. Neither ever
+    # fetches the third-party page's own content; see `discovery/search.py`
+    # and `discovery/sources.py` for why.
+    include_social_search: bool = False
+    include_b2b_directories: bool = False
+
 
 @dataclass
 class DiscoveredCompany:
@@ -51,6 +60,12 @@ class DiscoveredCompany:
     # profile).
     contact_page_url: str | None = None
     social_profiles: list[dict[str, str]] = field(default_factory=list)
+
+    # Populated only via the personal-profile search-snippet fallback (see
+    # `company_service._preview_from_profile_snippet`) — never by fetching
+    # a login-gated profile page directly.
+    contact_person_name: str | None = None
+    contact_person_title: str | None = None
 
     # --- Phase 3/4: business email & phone extraction ---
     # Each entry: {"email"|"phone": str, "is_valid": bool | None}.

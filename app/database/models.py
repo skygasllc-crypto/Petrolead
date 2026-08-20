@@ -35,6 +35,32 @@ class SearchStatus(str, enum.Enum):
     FAILED = "failed"
 
 
+class User(Base):
+    """An account with access to the app.
+
+    Accounts gate access to PetroLead; they don't partition the
+    company/search data itself, which stays a single shared workspace
+    (like a small team's shared tool) rather than per-user siloed data.
+    """
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    email: Mapped[str] = mapped_column(String(320), unique=True, index=True, nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    full_name: Mapped[str | None] = mapped_column(String(200))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Grants access to the /admin/users endpoints (view all accounts,
+    # block/unblock). Synced from `ADMIN_EMAILS` on every register/login —
+    # see `app.api.auth`.
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<User id={self.id!r} email={self.email!r}>"
+
+
 class Company(Base):
     """A discovered, deduplicated petroleum-industry company record."""
 
@@ -74,6 +100,10 @@ class Company(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=utcnow, onupdate=utcnow
     )
+    # Set when this company is included in a CSV/Excel export (Phase 8) —
+    # lets a user tell "already sent to my CRM/outreach list" apart from
+    # fresh leads. Never cleared automatically; re-exporting just bumps it.
+    exported_at: Mapped[datetime | None] = mapped_column(DateTime, index=True)
 
     sources: Mapped[list[CompanySource]] = relationship(
         back_populates="company", cascade="all, delete-orphan"
@@ -139,6 +169,14 @@ class CompanyContact(Base):
 
     contact_page_url: Mapped[str | None] = mapped_column(String(1000))
 
+    # A named contact at the company, when one was found — currently only
+    # sourced from a public search-engine snippet for a personal LinkedIn
+    # profile URL pasted into "paste a link" (the profile page itself is
+    # login-gated and never fetched directly; see
+    # `app.services.company_service._preview_from_profile_snippet`).
+    contact_person_name: Mapped[str | None] = mapped_column(String(200))
+    contact_person_title: Mapped[str | None] = mapped_column(String(200))
+
     discovered_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -189,6 +227,9 @@ class CompanyEmail(Base):
     is_valid: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     discovered_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    # Set when this email is included in a CSV/Excel export from the
+    # Emails page. Never cleared automatically; re-exporting bumps it.
+    exported_at: Mapped[datetime | None] = mapped_column(DateTime, index=True)
 
     company: Mapped[Company] = relationship(back_populates="emails")
 

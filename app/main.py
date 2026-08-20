@@ -5,13 +5,17 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.admin import router as admin_router
+from app.api.auth import router as auth_router
 from app.api.companies import router as companies_router
+from app.api.emails import router as emails_router
 from app.api.saved_searches import router as saved_searches_router
 from app.config import get_settings
+from app.core.deps import get_current_admin_user, get_current_user
 from app.core.logging import setup_logging
 from app.database.connection import init_db
 
@@ -32,6 +36,11 @@ async def lifespan(app: FastAPI):
         settings.database_url.split("://")[0] + "://***",
         settings.search_provider,
     )
+    if settings.using_default_secret_key and settings.app_env != "development":
+        logger.warning(
+            "SECRET_KEY is still the insecure development default outside a "
+            "development environment — set a real random value in .env."
+        )
     yield
     logger.info("PetroLead shutting down")
 
@@ -54,7 +63,9 @@ app.add_middleware(
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    return JSONResponse(
+        status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers
+    )
 
 
 @app.exception_handler(Exception)
@@ -64,8 +75,22 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     return JSONResponse(status_code=500, content={"detail": "An unexpected error occurred."})
 
 
-app.include_router(companies_router, prefix=settings.api_v1_prefix)
-app.include_router(saved_searches_router, prefix=settings.api_v1_prefix)
+app.include_router(auth_router, prefix=settings.api_v1_prefix)
+
+# Every other endpoint requires a logged-in user (accounts gate access to
+# the app; see app/database/models.py::User for why the underlying data
+# itself isn't per-user partitioned).
+_auth_required = [Depends(get_current_user)]
+app.include_router(companies_router, prefix=settings.api_v1_prefix, dependencies=_auth_required)
+app.include_router(emails_router, prefix=settings.api_v1_prefix, dependencies=_auth_required)
+app.include_router(
+    saved_searches_router, prefix=settings.api_v1_prefix, dependencies=_auth_required
+)
+app.include_router(
+    admin_router,
+    prefix=settings.api_v1_prefix,
+    dependencies=[Depends(get_current_admin_user)],
+)
 
 
 @app.get(f"{settings.api_v1_prefix}/health", tags=["system"])

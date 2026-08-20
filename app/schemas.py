@@ -4,9 +4,16 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ALLOWED_LIMITS = {10, 25, 50, 100}
+MAX_BULK_LOOKUP_ITEMS = 25
+
+
+class DiscoverUrlRequestSchema(BaseModel):
+    """Body for POST /api/discover-url — the "paste a link" quick lookup."""
+
+    url: AnyHttpUrl
 
 
 class DiscoverRequestSchema(BaseModel):
@@ -20,6 +27,8 @@ class DiscoverRequestSchema(BaseModel):
     products: list[str] = Field(default_factory=list)
     keywords: list[str] = Field(default_factory=list)
     limit: int = Field(default=25)
+    include_social_search: bool = Field(default=False)
+    include_b2b_directories: bool = Field(default=False)
 
     @field_validator("limit")
     @classmethod
@@ -40,6 +49,127 @@ class DiscoverRequestSchema(BaseModel):
             return None
         value = value.strip()
         return value or None
+
+
+class PreviewSocialProfileSchema(BaseModel):
+    platform: str
+    url: str
+
+
+class PreviewEmailSchema(BaseModel):
+    email: str
+    is_valid: bool | None = None
+
+
+class PreviewPhoneSchema(BaseModel):
+    phone: str
+    is_valid: bool = False
+
+
+class DiscoveredCompanyPreviewSchema(BaseModel):
+    """A discovered-but-not-yet-saved company — the shape returned by
+    `/discover` and `/discover-url`. Nothing with this shape exists in the
+    database until the client echoes it back to `/companies/save`."""
+
+    company_name: str
+    website: str | None = None
+    country: str | None = None
+    city: str | None = None
+    region: str | None = None
+    industry: str | None = None
+    description: str | None = None
+    activities: list[str] = Field(default_factory=list)
+    products: list[str] = Field(default_factory=list)
+    keywords: list[str] = Field(default_factory=list)
+    source: str = "unknown"
+    source_url: str | None = None
+    is_mock: bool = False
+    contact_page_url: str | None = None
+    social_profiles: list[PreviewSocialProfileSchema] = Field(default_factory=list)
+    emails: list[PreviewEmailSchema] = Field(default_factory=list)
+    phones: list[PreviewPhoneSchema] = Field(default_factory=list)
+    # Only set by the personal-profile search-snippet fallback ("paste a
+    # link" with a linkedin.com/in/... URL) — see `contact_person_name` on
+    # `DiscoveredCompany` for how this gets populated.
+    contact_person_name: str | None = None
+    contact_person_title: str | None = None
+    relevance_score: int
+    lead_score: int
+    already_saved: bool
+    existing_company_id: str | None = None
+
+
+class BulkContactLookupItemSchema(BaseModel):
+    """One row of a bulk lookup — either a LinkedIn profile URL, or a name
+    + company pair. Exactly one form must be given, not both."""
+
+    url: AnyHttpUrl | None = None
+    full_name: str | None = Field(default=None, max_length=200)
+    company_name: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def _exactly_one_form(self) -> BulkContactLookupItemSchema:
+        has_url = self.url is not None
+        has_name_and_company = bool(self.full_name and self.full_name.strip()) and bool(
+            self.company_name and self.company_name.strip()
+        )
+        if has_url == has_name_and_company:
+            raise ValueError(
+                "Provide either a url, or both full_name and company_name — not both forms."
+            )
+        return self
+
+
+class BulkContactLookupRequestSchema(BaseModel):
+    """Body for POST /api/contacts/bulk-lookup."""
+
+    items: list[BulkContactLookupItemSchema] = Field(min_length=1, max_length=MAX_BULK_LOOKUP_ITEMS)
+
+
+class BulkContactLookupResultSchema(BaseModel):
+    input_url: str | None = None
+    input_full_name: str | None = None
+    input_company_name: str | None = None
+    success: bool
+    error: str | None = None
+    preview: DiscoveredCompanyPreviewSchema | None = None
+
+
+class BulkContactLookupResponseSchema(BaseModel):
+    results: list[BulkContactLookupResultSchema]
+    succeeded_count: int
+    failed_count: int
+
+
+class SaveCompanyRequestSchema(BaseModel):
+    """Body for POST /api/companies/save — a client echoing back a preview
+    (from `/discover` or `/discover-url`) it wants persisted."""
+
+    company_name: str = Field(min_length=1, max_length=500)
+    website: str | None = None
+    country: str | None = None
+    city: str | None = None
+    region: str | None = None
+    industry: str | None = None
+    description: str | None = None
+    activities: list[str] = Field(default_factory=list)
+    products: list[str] = Field(default_factory=list)
+    keywords: list[str] = Field(default_factory=list)
+    source: str = "manual"
+    source_url: str | None = None
+    is_mock: bool = False
+    contact_page_url: str | None = None
+    social_profiles: list[PreviewSocialProfileSchema] = Field(default_factory=list)
+    emails: list[PreviewEmailSchema] = Field(default_factory=list)
+    phones: list[PreviewPhoneSchema] = Field(default_factory=list)
+    contact_person_name: str | None = None
+    contact_person_title: str | None = None
+
+
+class SaveCompaniesBulkRequestSchema(BaseModel):
+    """Body for POST /api/companies/save-bulk — "Save All" on a results page."""
+
+    companies: list[SaveCompanyRequestSchema] = Field(default_factory=list, max_length=200)
 
 
 class CompanySourceSchema(BaseModel):
@@ -67,6 +197,7 @@ class CompanySummarySchema(BaseModel):
     relevance_score: int
     lead_score: int | None = None
     discovered_at: datetime
+    exported_at: datetime | None = None
 
     @field_validator("lead_score", mode="before")
     @classmethod
@@ -82,6 +213,8 @@ class CompanyContactSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     contact_page_url: str | None
+    contact_person_name: str | None
+    contact_person_title: str | None
     discovered_at: datetime
 
 
@@ -138,6 +271,25 @@ class CompanyDetailSchema(CompanySummarySchema):
     )
 
 
+class ExtractedEmailSchema(BaseModel):
+    email: str
+    is_valid: bool | None
+    discovered_at: datetime
+    exported_at: datetime | None
+    company_id: str
+    company_name: str
+    company_website: str | None
+    company_country: str | None
+    company_industry: str | None
+
+
+class PaginatedEmailsSchema(BaseModel):
+    items: list[ExtractedEmailSchema]
+    total: int
+    page: int
+    page_size: int
+
+
 class PaginatedCompaniesSchema(BaseModel):
     items: list[CompanySummarySchema]
     total: int
@@ -153,7 +305,13 @@ class DiscoverResponseSchema(BaseModel):
     new_company_count: int
     duplicate_count: int
     is_mock: bool
-    companies: list[CompanySummarySchema]
+    companies: list[DiscoveredCompanyPreviewSchema]
+
+
+class SaveCompaniesBulkResponseSchema(BaseModel):
+    saved: list[CompanySummarySchema]
+    new_count: int
+    duplicate_count: int
 
 
 class SearchQuerySchema(BaseModel):
