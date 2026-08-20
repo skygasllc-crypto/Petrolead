@@ -4,33 +4,12 @@ import { api, ApiError } from "../api/client";
 import { COUNTRIES, INDUSTRIES } from "../lib/constants";
 import ErrorBanner from "../components/ErrorBanner";
 import EmptyState from "../components/EmptyState";
+import ValidityBadge from "../components/ValidityBadge";
 
 const PAGE_SIZE = 25;
 
 const selectClasses =
   "rounded-md border border-base-600 bg-base-800 px-3 py-2 text-sm text-ink-100 focus:border-brass-500 focus:outline-none";
-
-function VerifiedBadge({ isValid }) {
-  if (isValid === true) {
-    return (
-      <span className="rounded-full border border-status-high/30 bg-status-high/15 px-2 py-0.5 text-[10px] font-medium text-status-high">
-        Verified
-      </span>
-    );
-  }
-  if (isValid === false) {
-    return (
-      <span className="rounded-full border border-status-low/30 bg-status-low/15 px-2 py-0.5 text-[10px] font-medium text-status-low">
-        Unverified
-      </span>
-    );
-  }
-  return (
-    <span className="rounded-full border border-base-600 px-2 py-0.5 text-[10px] font-medium text-ink-700">
-      Check pending
-    </span>
-  );
-}
 
 export default function Emails() {
   const [items, setItems] = useState([]);
@@ -220,7 +199,7 @@ export default function Emails() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1.5">
-                      <VerifiedBadge isValid={e.is_valid} />
+                      <ValidityBadge isValid={e.is_valid} />
                       {e.exported_at && (
                         <span
                           className="rounded-full border border-status-relevant/30 bg-status-relevant/15 px-1.5 py-0.5 text-[10px] font-medium text-status-relevant"

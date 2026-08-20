@@ -309,7 +309,12 @@ class DiscoverResponseSchema(BaseModel):
 
 
 class SaveCompaniesBulkResponseSchema(BaseModel):
-    saved: list[CompanySummarySchema]
+    """`results[i]` is the outcome for `request.companies[i]` — `None` if
+    that one failed to save. Positional, not matched by name/website,
+    since a merge keeps the existing saved company's name rather than the
+    incoming candidate's — see `company_service.save_candidates_bulk`."""
+
+    results: list[CompanySummarySchema | None]
     new_count: int
     duplicate_count: int
 

@@ -38,6 +38,17 @@ class TestRegister:
         )
         assert response.status_code == 422
 
+    def test_password_over_bcrypt_byte_limit_rejected_cleanly(self, unauthenticated_client):
+        # bcrypt's hard cap is 72 bytes; the schema's own max_length=128
+        # (characters) would otherwise let a 73-127 char password through
+        # to hash_password(), which raises on the underlying bcrypt call.
+        # This must come back as a normal 422, not an unhandled 500.
+        response = unauthenticated_client.post(
+            "/api/auth/register",
+            json={"email": "long-password@example.com", "password": "a" * 90},
+        )
+        assert response.status_code == 422
+
     def test_password_is_never_returned_in_plaintext_or_hashed(self, unauthenticated_client):
         response = unauthenticated_client.post(
             "/api/auth/register",

@@ -254,7 +254,7 @@ def save_companies_bulk(
 ) -> SaveCompaniesBulkResponseSchema:
     """Save several previewed companies at once ("Save All" on a results page)."""
     try:
-        saved, new_count, duplicate_count = company_service.save_candidates_bulk(
+        results, new_count, duplicate_count = company_service.save_candidates_bulk(
             db, payload.companies
         )
     except Exception as exc:
@@ -263,7 +263,7 @@ def save_companies_bulk(
             status_code=500, detail="Could not save these companies. Please try again."
         ) from exc
     return SaveCompaniesBulkResponseSchema(
-        saved=saved, new_count=new_count, duplicate_count=duplicate_count
+        results=results, new_count=new_count, duplicate_count=duplicate_count
     )
 
 

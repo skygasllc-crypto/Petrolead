@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import RelevanceBadge from "../components/RelevanceBadge";
 import ErrorBanner from "../components/ErrorBanner";
+import ValidityBadge from "../components/ValidityBadge";
 import { sourceLabel } from "../lib/constants";
 
 function Section({ title, children }) {
@@ -39,28 +40,6 @@ const PLATFORM_LABELS = {
   instagram: "Instagram",
   youtube: "YouTube",
 };
-
-function ValidityBadge({ isValid }) {
-  if (isValid === true) {
-    return (
-      <span className="rounded-full border border-status-high/30 bg-status-high/15 px-2 py-0.5 text-[10px] font-medium text-status-high">
-        Verified
-      </span>
-    );
-  }
-  if (isValid === false) {
-    return (
-      <span className="rounded-full border border-status-low/30 bg-status-low/15 px-2 py-0.5 text-[10px] font-medium text-status-low">
-        Unverified
-      </span>
-    );
-  }
-  return (
-    <span className="rounded-full border border-base-600 px-2 py-0.5 text-[10px] font-medium text-ink-700">
-      Check pending
-    </span>
-  );
-}
 
 function ScoreBar({ label, value, max }) {
   const pct = max > 0 ? Math.round((value / max) * 100) : 0;

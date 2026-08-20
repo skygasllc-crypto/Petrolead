@@ -254,22 +254,27 @@ def _persist_candidate(
 
     Returns (None, False) if the candidate was unusable (no name) or
     persistence failed — callers just skip it, same as any other
-    single-candidate failure never aborting the whole job.
+    single-candidate failure never aborting the whole job. Runs inside a
+    SAVEPOINT (`db.begin_nested()`) so that a failed candidate only rolls
+    back its own work — not the still-uncommitted inserts of earlier
+    candidates already persisted in the same batch loop (`run_discovery`,
+    `save_candidates_bulk`), which share one session and one final commit.
     """
     if not candidate.company_name or not candidate.company_name.strip():
         return None, False
     try:
-        match = find_match(db, candidate)
-        if is_confident_match(match):
-            _merge_into_company(db, match.company, candidate, match.confidence)
-            return match.company, False
-        company = _create_company(db, candidate)
-        return company, True
+        with db.begin_nested():
+            match = find_match(db, candidate)
+            if is_confident_match(match):
+                _merge_into_company(db, match.company, candidate, match.confidence)
+                company, is_new = match.company, False
+            else:
+                company, is_new = _create_company(db, candidate), True
+        return company, is_new
     except Exception:
         logger.exception(
             "%s: failed to persist candidate %r — skipping", context, candidate.company_name
         )
-        db.rollback()
         return None, False
 
 
@@ -740,9 +745,14 @@ async def _preview_from_name_and_company(db: Session, *, full_name: str, company
 async def bulk_contact_lookup_preview(db: Session, items: list) -> list[dict]:
     """Look up several people at once — each item is either a LinkedIn
     profile URL (routed through the exact same logic as a single "paste a
-    link" lookup) or a plain name + company pair. Every item is resolved
-    independently and concurrently; one item failing (e.g. an unreachable
-    URL) never affects the others. Preview only, same as everywhere else —
+    link" lookup) or a plain name + company pair. Items are resolved one
+    at a time rather than concurrently: every path ends up running a
+    synchronous SQLAlchemy query against the shared request-scoped `db`
+    Session (via `_build_preview`), and a Session isn't safe for
+    concurrent/interleaved use even across cooperatively-scheduled
+    coroutines. One item failing — for any reason, not just an
+    unreachable URL — never affects the others: each is caught and
+    reported independently. Preview only, same as everywhere else —
     nothing here writes to the database.
     """
 
@@ -757,8 +767,16 @@ async def bulk_contact_lookup_preview(db: Session, items: list) -> list[dict]:
             return {"item": item, "success": True, "error": None, "preview": preview}
         except UrlLookupError as exc:
             return {"item": item, "success": False, "error": str(exc), "preview": None}
+        except Exception:
+            logger.exception("Bulk lookup: item failed unexpectedly — skipping. item=%r", item)
+            return {
+                "item": item,
+                "success": False,
+                "error": "Something went wrong looking this one up.",
+                "preview": None,
+            }
 
-    return list(await asyncio.gather(*(_resolve_one(item) for item in items)))
+    return [await _resolve_one(item) for item in items]
 
 
 def _preview_payload_to_candidate(payload) -> DiscoveredCompany:
@@ -801,25 +819,35 @@ def save_candidate(db: Session, payload) -> Company:
     return company
 
 
-def save_candidates_bulk(db: Session, payloads: list) -> tuple[list[Company], int, int]:
-    """Persist several previewed candidates at once ("Save All")."""
+def save_candidates_bulk(db: Session, payloads: list) -> tuple[list[Company | None], int, int]:
+    """Persist several previewed candidates at once ("Save All").
+
+    Returns one result per input payload, in the same order — `None`
+    where that particular candidate failed to persist. Callers need this
+    positional alignment to report per-row outcomes back to the UI;
+    matching a saved company back to its input row by mutable fields like
+    `company_name` doesn't work reliably, since a confident-match merge
+    keeps the *existing* saved company's name, not the incoming
+    candidate's.
+    """
     new_count = 0
     duplicate_count = 0
-    saved: list[Company] = []
+    results: list[Company | None] = []
     for payload in payloads:
         candidate = _preview_payload_to_candidate(payload)
         company, is_new = _persist_candidate(db, candidate, context="bulk save")
+        results.append(company)
         if company is None:
             continue
-        saved.append(company)
         if is_new:
             new_count += 1
         else:
             duplicate_count += 1
     db.commit()
-    for company in saved:
-        db.refresh(company)
-    return saved, new_count, duplicate_count
+    for company in results:
+        if company is not None:
+            db.refresh(company)
+    return results, new_count, duplicate_count
 
 
 def _filtered_companies_stmt(

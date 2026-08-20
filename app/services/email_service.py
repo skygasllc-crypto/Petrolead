@@ -12,8 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, contains_eager
 
 from app.database.models import Company, CompanyEmail, utcnow
-
-MAX_EMAIL_EXPORT_ROWS = 5000
+from app.services.company_service import MAX_EXPORT_ROWS as MAX_EMAIL_EXPORT_ROWS
 
 
 def _row_to_dict(email: CompanyEmail) -> dict:

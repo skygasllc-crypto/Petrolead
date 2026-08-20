@@ -47,53 +47,66 @@ export default function SearchHistory() {
         />
       ) : (
         <div className="flex flex-col gap-3">
-          {items.map((search) => (
-            <div
-              key={search.id}
-              className="rounded-xl border border-base-700 bg-base-850 p-5"
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex flex-wrap items-center gap-2 text-sm text-ink-100">
-                  {[search.region, search.country, search.city, search.industry]
-                    .filter(Boolean)
-                    .map((v) => (
+          {items.map((search) => {
+            // Only a scheduled run (Phase 10) auto-persists its results —
+            // an interactive search is preview-only until the user clicks
+            // "Save All", so its new/duplicate counts describe what would
+            // happen on save, not what was actually saved. See
+            // `discover_preview`'s docstring in app/services/company_service.py.
+            const isScheduledRun = Boolean(search.saved_search_id);
+            return (
+              <div
+                key={search.id}
+                className="rounded-xl border border-base-700 bg-base-850 p-5"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-ink-100">
+                    {[search.region, search.country, search.city, search.industry]
+                      .filter(Boolean)
+                      .map((v) => (
+                        <span
+                          key={v}
+                          className="rounded-full border border-base-600 px-2.5 py-0.5 text-xs text-ink-300"
+                        >
+                          {v}
+                        </span>
+                      ))}
+                    {search.products?.map((p) => (
                       <span
-                        key={v}
-                        className="rounded-full border border-base-600 px-2.5 py-0.5 text-xs text-ink-300"
+                        key={p}
+                        className="rounded-full border border-brass-500/30 bg-brass-500/10 px-2.5 py-0.5 text-xs text-brass-300"
                       >
-                        {v}
+                        {p}
                       </span>
                     ))}
-                  {search.products?.map((p) => (
-                    <span
-                      key={p}
-                      className="rounded-full border border-brass-500/30 bg-brass-500/10 px-2.5 py-0.5 text-xs text-brass-300"
-                    >
-                      {p}
-                    </span>
-                  ))}
+                  </div>
+                  <span
+                    className={`rounded-full border px-2.5 py-0.5 text-xs font-medium capitalize ${
+                      STATUS_STYLES[search.status] || STATUS_STYLES.pending
+                    }`}
+                  >
+                    {search.status}
+                  </span>
                 </div>
-                <span
-                  className={`rounded-full border px-2.5 py-0.5 text-xs font-medium capitalize ${
-                    STATUS_STYLES[search.status] || STATUS_STYLES.pending
-                  }`}
-                >
-                  {search.status}
-                </span>
-              </div>
 
-              <p className="mt-3 text-sm text-ink-500">
-                {search.status_message || "No summary available."}
-              </p>
+                <p className="mt-3 text-sm text-ink-500">
+                  {search.status_message || "No summary available."}
+                </p>
 
-              <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-ink-700">
-                <span>{new Date(search.created_at).toLocaleString()}</span>
-                <span>{search.result_count} result(s)</span>
-                <span>{search.new_company_count} new</span>
-                <span>{search.duplicate_count} matched existing</span>
+                <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-ink-700">
+                  <span>{new Date(search.created_at).toLocaleString()}</span>
+                  <span>{search.result_count} result(s)</span>
+                  <span>
+                    {search.new_company_count} {isScheduledRun ? "new" : "not yet saved"}
+                  </span>
+                  <span>
+                    {search.duplicate_count}{" "}
+                    {isScheduledRun ? "matched existing" : "already in your companies"}
+                  </span>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

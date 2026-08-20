@@ -147,20 +147,14 @@ export default function Discover() {
 
     try {
       const response = await api.saveCompaniesBulk(toSave.map(({ c }) => c));
-      const remaining = [...response.saved];
       setSavedState((s) => {
         const next = { ...s };
-        toSave.forEach(({ c, index }) => {
-          const matchIdx = remaining.findIndex(
-            (saved) =>
-              saved.company_name === c.company_name &&
-              (saved.website || null) === (c.website || null),
-          );
-          if (matchIdx === -1) {
+        toSave.forEach(({ index }, position) => {
+          const saved = response.results[position];
+          if (!saved) {
             next[index] = { status: "error", error: "Could not save." };
             return;
           }
-          const [saved] = remaining.splice(matchIdx, 1);
           next[index] = { status: "saved", companyId: saved.id };
         });
         return next;

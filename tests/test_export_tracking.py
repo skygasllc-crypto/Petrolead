@@ -70,7 +70,7 @@ class TestEmailsAreNotReExtracted:
         _, save_response = discover_and_save(
             client, {"country": "United Arab Emirates", "limit": 10}
         )
-        company_id = save_response.json()["saved"][0]["id"]
+        company_id = save_response.json()["results"][0]["id"]
         emails_after_first = client.get(f"/api/companies/{company_id}").json()["emails"]
         assert len(emails_after_first) > 0
 

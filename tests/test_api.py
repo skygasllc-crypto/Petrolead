@@ -1,3 +1,4 @@
+from app.services import company_service
 from tests.helpers import discover_and_save
 
 
@@ -133,7 +134,7 @@ class TestCompaniesEndpoint:
         _, save_response = discover_and_save(
             client, {"country": "United Arab Emirates", "limit": 10}
         )
-        company_id = save_response.json()["saved"][0]["id"]
+        company_id = save_response.json()["results"][0]["id"]
         response = client.get(f"/api/companies/{company_id}")
         assert response.status_code == 200
         body = response.json()
@@ -144,7 +145,7 @@ class TestCompaniesEndpoint:
         _, save_response = discover_and_save(
             client, {"country": "United Arab Emirates", "limit": 10}
         )
-        company_id = save_response.json()["saved"][0]["id"]
+        company_id = save_response.json()["results"][0]["id"]
         response = client.get(f"/api/companies/{company_id}")
         body = response.json()
         # Mock mode synthesizes clearly-labeled contact/social data so the
@@ -168,7 +169,7 @@ class TestCompaniesEndpoint:
             client, {"country": "United Arab Emirates", "limit": 10}
         )
         assert discover_response.json()["companies"][0]["lead_score"] is not None
-        company_id = save_response.json()["saved"][0]["id"]
+        company_id = save_response.json()["results"][0]["id"]
 
         response = client.get(f"/api/companies/{company_id}")
         body = response.json()
@@ -207,11 +208,48 @@ class TestSaveEndpoints:
         assert first_save.status_code == 200
         body = first_save.json()
         assert body["new_count"] > 0
-        assert len(body["saved"]) == body["new_count"] + body["duplicate_count"]
+        assert len(body["results"]) == len(companies)
+        assert sum(1 for r in body["results"] if r is not None) == (
+            body["new_count"] + body["duplicate_count"]
+        )
 
         # Saving the exact same preview data again should merge, not duplicate.
         second_save = client.post("/api/companies/save-bulk", json={"companies": companies})
         assert second_save.json()["new_count"] == 0
+
+    def test_one_candidate_failing_does_not_roll_back_others_in_the_same_batch(
+        self, client, monkeypatch
+    ):
+        # Regression test: _persist_candidate used to call db.rollback()
+        # on failure, which discarded the still-uncommitted inserts of
+        # every earlier candidate in the same "Save All" loop too (they
+        # all share one session and one final commit).
+        discover_response = client.post(
+            "/api/discover", json={"country": "United Arab Emirates", "limit": 10}
+        )
+        companies = discover_response.json()["companies"][:3]
+        assert len(companies) == 3
+        boom_name = companies[1]["company_name"]
+
+        original_find_match = company_service.find_match
+
+        def flaky_find_match(db, candidate):
+            if candidate.company_name == boom_name:
+                raise RuntimeError("simulated persistence failure")
+            return original_find_match(db, candidate)
+
+        monkeypatch.setattr(company_service, "find_match", flaky_find_match)
+
+        response = client.post("/api/companies/save-bulk", json={"companies": companies})
+        assert response.status_code == 200
+        results = response.json()["results"]
+        assert results[0] is not None
+        assert results[1] is None
+        assert results[2] is not None
+
+        saved_names = {c["company_name"] for c in client.get("/api/companies").json()["items"]}
+        assert companies[0]["company_name"] in saved_names
+        assert companies[2]["company_name"] in saved_names
 
     def test_save_single_company(self, client):
         discover_response = client.post(

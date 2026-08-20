@@ -87,6 +87,38 @@ class TestBulkContactLookupUrls:
         assert body["results"][1]["error"]
         assert body["results"][1]["preview"] is None
 
+    def test_one_item_raising_an_unexpected_error_does_not_abort_the_batch(
+        self, client, monkeypatch
+    ):
+        # Regression test: bulk lookup used to only catch UrlLookupError,
+        # so any other exception from one item (e.g. a bug, a transient
+        # DB error) propagated and failed the whole batch instead of just
+        # that one item.
+        original_find_match = company_service.find_match
+
+        def flaky_find_match(db, candidate):
+            if candidate.company_name == "Boom Petroleum":
+                raise RuntimeError("simulated unexpected failure")
+            return original_find_match(db, candidate)
+
+        monkeypatch.setattr(company_service, "find_match", flaky_find_match)
+
+        response = client.post(
+            "/api/contacts/bulk-lookup",
+            json={
+                "items": [
+                    {"full_name": "Jane Doe", "company_name": "Boom Petroleum"},
+                    {"full_name": "John Roe", "company_name": "Falcon Petroleum"},
+                ]
+            },
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["succeeded_count"] == 1
+        assert body["failed_count"] == 1
+        assert body["results"][0]["success"] is False
+        assert body["results"][1]["success"] is True
+
     def test_bulk_lookup_never_saves_anything(self, client):
         client.post(
             "/api/contacts/bulk-lookup",
