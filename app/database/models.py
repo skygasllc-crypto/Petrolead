@@ -91,10 +91,62 @@ class Subscription(Base):
     discovery_day: Mapped[str | None] = mapped_column(String(10))
     discovery_searches_today: Mapped[int] = mapped_column(Integer, default=0)
 
+    # End of the period the customer has paid for. The plan stops working
+    # (and stops receiving monthly credits) once it passes. None for plans
+    # an admin assigned without a payment — those don't expire.
+    paid_until: Mapped[datetime | None] = mapped_column(DateTime)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
     user: Mapped[User] = relationship(back_populates="subscription")
+
+
+class PaymentOrder(Base):
+    """A crypto payment for a plan, checked and confirmed by an admin.
+
+    The customer sends coins to the receiving address shown, then marks the
+    order paid with the transaction ID. An admin checks that transaction on
+    a block explorer and confirms it — activating the plan — or rejects it.
+    No payment processor, wallet software or private keys are involved; see
+    `app.services.payment_service`.
+    """
+
+    __tablename__ = "payment_orders"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE", name="fk_payment_orders_user_id_users"),
+        index=True,
+        nullable=False,
+    )
+
+    plan: Mapped[str] = mapped_column(String(50), nullable=False)
+    credits_per_month: Mapped[int] = mapped_column(Integer, nullable=False)
+    billing_period: Mapped[str] = mapped_column(String(10), nullable=False)  # monthly | yearly
+    amount_usd_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    currency: Mapped[str] = mapped_column(String(20), nullable=False)  # BTC | USDT_TRC20 | TRX
+    pay_address: Mapped[str] = mapped_column(String(120), nullable=False)
+    # The exact amount the customer was asked to send, as a decimal string.
+    amount_crypto: Mapped[str] = mapped_column(String(40), nullable=False)
+    # US dollars per coin used for the quote; None for USDT (priced 1:1).
+    usd_rate: Mapped[str | None] = mapped_column(String(40))
+
+    status: Mapped[str] = mapped_column(String(20), index=True, nullable=False)
+    tx_hash: Mapped[str | None] = mapped_column(String(100), unique=True)
+    admin_note: Mapped[str | None] = mapped_column(String(500))
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    # When the price quote lapses if the order hasn't been marked paid.
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    reviewed_by_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", name="fk_payment_orders_reviewed_by_id_users")
+    )
+
+    user: Mapped[User] = relationship(foreign_keys=[user_id])
 
 
 class CreditTransaction(Base):

@@ -22,7 +22,10 @@ import SearchHistory from "./pages/SearchHistory";
 import ScheduledSearches from "./pages/ScheduledSearches";
 import Settings from "./pages/Settings";
 import AdminUsers from "./pages/AdminUsers";
+import AdminPayments from "./pages/AdminPayments";
 import Billing from "./pages/Billing";
+import Checkout from "./pages/Checkout";
+import PaymentOrder from "./pages/PaymentOrder";
 
 export default function App() {
   return (
@@ -51,8 +54,11 @@ export default function App() {
             <Route path="/searches" element={<SearchHistory />} />
             <Route path="/scheduled" element={<ScheduledSearches />} />
             <Route path="/billing" element={<Billing />} />
+            <Route path="/billing/orders/:orderId" element={<PaymentOrder />} />
+            <Route path="/checkout" element={<Checkout />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/admin/users" element={<AdminUsers />} />
+            <Route path="/admin/payments" element={<AdminPayments />} />
           </Route>
         </Route>
       </Routes>

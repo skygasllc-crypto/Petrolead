@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { ApiError } from "../api/client";
+import { safeNextPath } from "../lib/redirects";
 import Logo from "../components/Logo";
 import ErrorBanner from "../components/ErrorBanner";
 
@@ -13,6 +14,10 @@ const MIN_PASSWORD_LENGTH = 8;
 export default function Register() {
   const { user, loading, register } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // After sign-up, continue where the user was heading (e.g. checkout).
+  const next = safeNextPath(searchParams.get("next"));
+  const destination = next || "/dashboard";
 
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
@@ -22,7 +27,7 @@ export default function Register() {
   const [submitting, setSubmitting] = useState(false);
 
   if (!loading && user) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to={destination} replace />;
   }
 
   async function handleSubmit(e) {
@@ -41,7 +46,7 @@ export default function Register() {
     setSubmitting(true);
     try {
       await register(email, password, fullName);
-      navigate("/dashboard", { replace: true });
+      navigate(destination, { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong.");
     } finally {
@@ -134,7 +139,10 @@ export default function Register() {
         </div>
         <p className="mt-4 text-center text-sm text-ink-500">
           Already have an account?{" "}
-          <Link to="/login" className="text-brand-600 hover:underline">
+          <Link
+            to={next ? `/login?next=${encodeURIComponent(next)}` : "/login"}
+            className="text-brand-600 hover:underline"
+          >
             Log in
           </Link>
         </p>

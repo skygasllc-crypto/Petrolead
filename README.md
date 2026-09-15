@@ -215,6 +215,11 @@ Copy `.env.example` to `.env` and fill in real values. **Never commit `.env`.**
 | `SECRET_KEY` | Signs login session tokens. **The shipped default is insecure and dev-only** — generate a real one: `python -c "import secrets; print(secrets.token_hex(32))"`. |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Login session lifetime. Default 10080 (1 week). |
 | `ADMIN_EMAILS` | Comma-separated emails that get admin access (the Users page, plan and credit management). Applied on every register/login; only grants, never revokes. |
+| `CRYPTO_BTC_ADDRESS` / `CRYPTO_USDT_TRC20_ADDRESS` / `CRYPTO_TRX_ADDRESS` | Your **public** receiving addresses for plan payments (see "Crypto payments" below). A coin is only offered once its address is set. Never put a private key or seed phrase anywhere in the app. |
+| `CRYPTO_QUOTE_MINUTES` | How long a BTC/TRX price quote holds before an unpaid order expires. Default 60. |
+| `COINGECKO_API_KEY` | Optional free CoinGecko Demo key for steadier live BTC/TRX prices; the keyless API works without it. |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_USE_TLS` | Optional. When set, admins get an email for every payment waiting for confirmation. |
+| `APP_BASE_URL` | Where the web app is served, for links in those emails. |
 | `BILLING_ENFORCED` | Default `true`: every non-admin account needs a plan, spends one email credit per person lookup that finds an email, and is held to its plan's limits (see "Plans & credits" below). Admins are never limited. `false` switches all limits off. |
 | `SEARCH_PROVIDER` | `mock` \| `google_cse` \| `bing` \| `serpapi` \| `searchapi_io` \| `serper` |
 | `GOOGLE_CSE_API_KEY` / `GOOGLE_CSE_ENGINE_ID` | Required for `google_cse`. Get from [Programmable Search Engine](https://programmablesearchengine.google.com/). Note: Google requires a billing account linked to the project before the API will serve requests at all, even within the free 100/day quota. |
@@ -344,7 +349,16 @@ accepting either `False` or `None`.)
 | `POST` | `/api/saved-searches/run-due` | Manually run whichever saved searches are currently due (no worker required). |
 | `POST` | `/api/contacts/bulk-lookup` | Look up to 25 people at once — each item is `{"url": "linkedin.com/in/..."}` or `{"full_name", "company_name"}`. **Preview only.** |
 | `POST` | `/api/emails/verify` | Email Verifier — body: `{"emails": [...]}` (up to 50). Checks each address's format, then whether its domain has mail (MX) records; never contacts the mailbox. |
-| `GET` | `/api/billing/me` | The current user's plan, credit balance, renewal date, today's search count and plan limits. |
+| `GET` | `/api/billing/me` | The current user's plan, credit balance, renewal date, paid-until date, today's search count and plan limits. |
+| `GET` | `/api/billing/payment-methods` | Coins accepted for plans (those with a receiving address configured). |
+| `POST` | `/api/billing/orders` | Start paying for a plan — body: `plan`, `credits_per_month`, `billing_period` (`monthly`\|`yearly`), `currency` (`BTC`\|`USDT_TRC20`\|`TRX`). Returns the address and exact amount; the price comes from `app/services/plans.py`. |
+| `GET` | `/api/billing/orders` / `/api/billing/orders/{id}` | The current user's payment orders. |
+| `POST` | `/api/billing/orders/{id}/paid` | "I have paid" — body: `{"tx_hash"}`. Notifies admins. A transaction ID can only be used once. |
+| `POST` | `/api/billing/orders/{id}/cancel` | Cancel an order that hasn't been marked paid. |
+| `GET` | `/api/admin/payments` | *(admin)* Payment orders, optionally `?status=submitted`. |
+| `GET` | `/api/admin/payments/pending-count` | *(admin)* How many payments are waiting for confirmation. |
+| `POST` | `/api/admin/payments/{id}/confirm` | *(admin)* Confirm a checked payment — starts, renews or changes the customer's plan. |
+| `POST` | `/api/admin/payments/{id}/reject` | *(admin)* Reject a payment — body: `{"note"}`, shown to the customer. |
 | `GET` | `/api/admin/users` | *(admin)* Every account, with its plan and credit balance. |
 | `PATCH` | `/api/admin/users/{id}` | *(admin)* Block/unblock — body: `{"is_active": bool}`. |
 | `PUT` | `/api/admin/users/{id}/subscription` | *(admin)* Put a user on a plan — body: `{"plan", "credits_per_month"}`. A new plan grants its first month of credits immediately. |
@@ -379,6 +393,29 @@ used. Every change is recorded in the `credit_transactions` table. Admins
 are never limited. Scheduled searches are limited per plan too (none on
 Basic, 5 on Professional, unlimited on Enterprise), and stop running while
 their owner's plan doesn't include them.
+
+**Crypto payments.** Customers pay for plans in BTC, USDT (TRC-20) or TRX,
+with no payment processor involved:
+
+1. On the Pricing page a customer picks a plan, credit tier and billing
+   period, then a coin. Checkout creates an order showing your receiving
+   address (from `CRYPTO_*_ADDRESS`) and the exact amount — USDT at 1:1 with
+   the dollar, BTC and TRX from a live CoinGecko price held for
+   `CRYPTO_QUOTE_MINUTES`.
+2. The customer sends the coins and clicks **I have paid**, entering the
+   transaction ID. Admins see a badge on **Payments** (and get an email if
+   SMTP is configured).
+3. An admin opens the payment, follows the explorer link (mempool.space for
+   BTC, tronscan.org for TRON), and checks that the transaction sent at
+   least the amount shown to your address on the right network. **Confirm
+   payment** starts, renews or changes the plan for 1 or 12 months;
+   **Reject** records a note the customer sees.
+
+Paid plans end when their paid period does (credits stop renewing and the
+tools are blocked until the customer pays again); nothing renews
+automatically. Plans an admin assigns on the Users page have no end date.
+Confirming payments is manual, so only confirm what you've verified on the
+explorer — the app never holds wallet keys and can't see your wallet.
 
 ---
 

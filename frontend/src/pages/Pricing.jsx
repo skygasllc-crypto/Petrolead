@@ -12,6 +12,7 @@ import {
   SALES_EMAIL,
   YEARLY_DISCOUNT,
 } from "../components/marketing/pricing";
+import { checkoutPath } from "../lib/payments";
 
 const formatNumber = (n) => n.toLocaleString("en-US");
 
@@ -113,6 +114,7 @@ function PlanCard({ plan, tierIndex, onTierChange, yearly }) {
   const { user } = useAuth();
   const tier = plan.tiers[tierIndex];
   const price = priceFor(tier, yearly);
+  const checkout = checkoutPath(plan.id, tier.credits, yearly ? "yearly" : "monthly");
 
   return (
     <div
@@ -178,7 +180,7 @@ function PlanCard({ plan, tierIndex, onTierChange, yearly }) {
         </div>
 
         <Link
-          to={user ? "/dashboard" : "/register"}
+          to={user ? checkout : `/register?next=${encodeURIComponent(checkout)}`}
           className={`mt-6 w-full py-3 ${
             plan.outlined ? `${secondaryButton} border-brand-500` : primaryButton
           }`}

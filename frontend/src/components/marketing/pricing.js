@@ -123,6 +123,10 @@ export const COMPARISON = [
 
 export const PRICING_FAQS = [
   {
+    q: "How do I pay?",
+    a: "In Bitcoin (BTC), Tether (USDT on the TRON network) or TRON (TRX). Choose a plan, send the amount shown to the address on the payment page, then click \"I have paid\" with your transaction ID. Your plan starts as soon as the payment is confirmed.",
+  },
+  {
     q: "What are email credits?",
     a: "One credit is used each time PetroLead finds a business email for you — from a LinkedIn profile link, a name and company, or a line in a bulk lookup.",
   },
@@ -144,10 +148,10 @@ export const PRICING_FAQS = [
   },
   {
     q: "Can I change plans at any time?",
-    a: "Yes. Upgrade or downgrade whenever you like — a larger credit tier is available right away.",
+    a: "Yes. Pay for the plan you want from this page — it switches as soon as your payment is confirmed.",
   },
   {
     q: "Is there a long-term contract?",
-    a: `No. Pay monthly, or pay yearly to save ${YEARLY_DISCOUNT * 100}%, and cancel any time.`,
+    a: `No. Pay for one month, or for a year at ${YEARLY_DISCOUNT * 100}% off. Nothing renews automatically — when your plan is about to end, just pay again.`,
   },
 ];

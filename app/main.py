@@ -14,12 +14,14 @@ from app.api.auth import router as auth_router
 from app.api.billing import router as billing_router
 from app.api.companies import router as companies_router
 from app.api.emails import router as emails_router
+from app.api.payments import router as payments_router
 from app.api.saved_searches import router as saved_searches_router
 from app.config import get_settings
 from app.core.deps import get_current_admin_user, get_current_user
 from app.core.logging import setup_logging
 from app.database.migrations import run_migrations
 from app.services.billing_service import BillingError
+from app.services.payment_service import PaymentError
 
 setup_logging()
 logger = logging.getLogger("petrolead.main")
@@ -78,6 +80,11 @@ async def billing_exception_handler(request: Request, exc: BillingError) -> JSON
     return JSONResponse(status_code=exc.status_code, content={"detail": str(exc)})
 
 
+@app.exception_handler(PaymentError)
+async def payment_exception_handler(request: Request, exc: PaymentError) -> JSONResponse:
+    return JSONResponse(status_code=exc.status_code, content={"detail": str(exc)})
+
+
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     # Never leak stack traces to clients; full detail goes to the logs only.
@@ -93,6 +100,7 @@ _auth_required = [Depends(get_current_user)]
 app.include_router(companies_router, prefix=settings.api_v1_prefix, dependencies=_auth_required)
 app.include_router(emails_router, prefix=settings.api_v1_prefix, dependencies=_auth_required)
 app.include_router(billing_router, prefix=settings.api_v1_prefix, dependencies=_auth_required)
+app.include_router(payments_router, prefix=settings.api_v1_prefix, dependencies=_auth_required)
 app.include_router(
     saved_searches_router, prefix=settings.api_v1_prefix, dependencies=_auth_required
 )

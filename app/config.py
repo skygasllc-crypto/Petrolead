@@ -78,6 +78,29 @@ class Settings(BaseSettings):
     # `app.services.billing_service`. Admins are never limited.
     billing_enforced: bool = True
 
+    # --- Crypto payments ---
+    # Public receiving addresses shown to customers at checkout; a coin is
+    # only offered once its address is set. Never put private keys or seed
+    # phrases anywhere in this app — confirming payments is done by hand.
+    crypto_btc_address: str | None = None
+    crypto_usdt_trc20_address: str | None = None
+    crypto_trx_address: str | None = None
+    # Minutes a BTC/TRX price quote holds before an unpaid order expires.
+    crypto_quote_minutes: int = 60
+    # Optional free CoinGecko "Demo" key for steadier BTC/TRX price quotes.
+    coingecko_api_key: str | None = None
+
+    # --- Email (optional) ---
+    # When set, admins get an email for every payment waiting for confirmation.
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_from: str | None = None
+    smtp_use_tls: bool = True
+    # Where the web app is served — used for links in those emails.
+    app_base_url: str = "http://localhost:5173"
+
     # --- Logging ---
     log_level: str = "INFO"
 

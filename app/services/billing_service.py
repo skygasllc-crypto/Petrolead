@@ -66,7 +66,10 @@ def renew_if_due(db: Session, subscription: Subscription, *, now: datetime | Non
     last renewal. Unused credits roll over, so each grant adds to the balance."""
     now = now or utcnow()
     renewed = False
-    while subscription.renews_at <= now:
+    # Credits only keep coming while the plan is paid for.
+    while subscription.renews_at <= now and (
+        subscription.paid_until is None or subscription.renews_at < subscription.paid_until
+    ):
         subscription.credits_balance += subscription.credits_per_month
         subscription.period_started_at = subscription.renews_at
         subscription.renews_at = subscription.renews_at + relativedelta(months=1)
@@ -81,6 +84,11 @@ def renew_if_due(db: Session, subscription: Subscription, *, now: datetime | Non
         renewed = True
     if renewed:
         db.commit()
+
+
+def plan_expired(subscription: Subscription, now: datetime | None = None) -> bool:
+    """Whether a paid-for plan's period has ended. Admin-assigned plans never expire."""
+    return subscription.paid_until is not None and (now or utcnow()) >= subscription.paid_until
 
 
 def get_subscription(db: Session, user: User) -> Subscription | None:
@@ -99,7 +107,14 @@ def require_plan(db: Session, user: User) -> tuple[Subscription, Plan] | None:
     subscription = get_subscription(db, user)
     if subscription is None or subscription.plan not in PLANS:
         raise BillingError(NO_PLAN_MESSAGE, 402)
-    return subscription, PLANS[subscription.plan]
+    plan = PLANS[subscription.plan]
+    if plan_expired(subscription):
+        raise BillingError(
+            f"Your {plan.name} plan ended on {_format_date(subscription.paid_until)}. Renew it "
+            "on the Plan & credits page to keep using PetroLead.",
+            402,
+        )
+    return subscription, plan
 
 
 def require_feature(db: Session, user: User, feature: str, label: str) -> None:
@@ -214,7 +229,7 @@ def allows_scheduled_searches(db: Session, user: User) -> bool:
         return True
     subscription = get_subscription(db, user)
     plan = PLANS.get(subscription.plan) if subscription else None
-    return plan is not None and plan.scheduled_searches != 0
+    return plan is not None and plan.scheduled_searches != 0 and not plan_expired(subscription)
 
 
 def record_discovery(db: Session, user: User) -> None:
@@ -285,6 +300,77 @@ def assign_plan(
     return subscription
 
 
+def activate_paid_plan(
+    db: Session,
+    user: User,
+    *,
+    plan_id: str,
+    credits_per_month: int,
+    months: int,
+    detail: str,
+) -> Subscription:
+    """Apply a confirmed payment for `months` of a plan.
+
+    - No plan, or an expired one: the plan starts now with its first month's
+      credits (any credits left over are kept).
+    - The same plan and tier, still running: the paid period is extended.
+    - A different plan or tier: it switches now with the new tier's first
+      month of credits, and the paid period runs on from the later of now
+      and the old end date.
+    """
+    plan = PLANS.get(plan_id)
+    if plan is None or credits_per_month not in plan.credit_tiers:
+        raise ValueError(f"Unknown plan or tier: {plan_id}/{credits_per_month}")
+
+    now = utcnow()
+    subscription = get_subscription(db, user)
+    if subscription is None:
+        subscription = Subscription(
+            user_id=user.id,
+            plan=plan.id,
+            credits_per_month=credits_per_month,
+            credits_balance=0,
+            period_started_at=now,
+            renews_at=now,
+        )
+        db.add(subscription)
+        expired = True
+    else:
+        expired = plan_expired(subscription, now)
+
+    same_plan = (
+        subscription.plan == plan.id and subscription.credits_per_month == credits_per_month
+    )
+    if expired or not same_plan:
+        granted = credits_per_month
+        subscription.plan = plan.id
+        subscription.credits_per_month = credits_per_month
+        subscription.credits_balance += credits_per_month
+        subscription.period_started_at = now
+        subscription.renews_at = now + relativedelta(months=1)
+    else:
+        granted = 0
+
+    if expired or subscription.paid_until is None:
+        start = now
+    else:
+        start = max(now, subscription.paid_until)
+    subscription.paid_until = start + relativedelta(months=months)
+
+    _record(db, user.id, granted, "payment_confirmed", detail, subscription.credits_balance)
+    db.commit()
+    db.refresh(subscription)
+    logger.info(
+        "User %s paid for %d month(s) of %s/%d; paid until %s",
+        user.id,
+        months,
+        plan.id,
+        credits_per_month,
+        subscription.paid_until,
+    )
+    return subscription
+
+
 def remove_plan(db: Session, user: User, *, admin: User) -> None:
     """Take a user off their plan; any remaining credits go with it."""
     subscription = get_subscription(db, user)
@@ -336,6 +422,8 @@ def summary(db: Session, user: User) -> dict:
         "credits_balance": subscription.credits_balance if subscription else 0,
         "credits_per_month": subscription.credits_per_month if subscription else None,
         "renews_at": subscription.renews_at if subscription else None,
+        "paid_until": subscription.paid_until if subscription else None,
+        "expired": bool(subscription and plan_expired(subscription)),
         "discovery_searches_today": searches_today,
         "discovery_searches_per_day": plan.discovery_searches_per_day if plan else None,
         "max_results_per_search": plan.max_results_per_search if plan else None,

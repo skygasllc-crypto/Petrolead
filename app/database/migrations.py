@@ -20,8 +20,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 INITIAL_REVISION = "0001"
 
 # Tables a database created before migrations existed may still be missing,
-# depending on which version of the app first created it. None of them are
-# changed by later migrations, so they're safe to create from today's models.
+# depending on which version of the app first created it. They're created
+# from today's models, so any later migration that changes one of these
+# tables must allow for the change already being there (see 0003).
 _TABLES_OLDER_DATABASES_MAY_LACK = ("users", "subscriptions", "credit_transactions")
 
 

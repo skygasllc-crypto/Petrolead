@@ -1,5 +1,5 @@
-"""Admin-only user management: view every account, block/unblock access, and
-manage each account's plan and email credits.
+"""Admin-only user management: view every account, block/unblock access,
+manage each account's plan and email credits, and review crypto payments.
 
 Every endpoint here requires `is_admin` (enforced at router-inclusion time
 in `app.main`, same pattern as the auth-required routers) — see
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -18,8 +18,14 @@ from app.core.deps import get_current_admin_user
 from app.database.connection import get_db
 from app.database.models import User
 from app.schemas_auth import AdminUserSchema, UpdateUserStatusRequestSchema
-from app.schemas_billing import AdjustCreditsRequestSchema, AssignPlanRequestSchema
-from app.services import billing_service
+from app.schemas_billing import (
+    AdjustCreditsRequestSchema,
+    AdminPaymentOrderSchema,
+    AssignPlanRequestSchema,
+    ConfirmPaymentRequestSchema,
+    RejectPaymentRequestSchema,
+)
+from app.services import billing_service, payment_service
 
 logger = logging.getLogger("petrolead.api.admin")
 
@@ -118,3 +124,49 @@ def adjust_user_credits(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     db.refresh(user)
     return user
+
+
+_ORDER_STATUS_PATTERN = "^(" + "|".join(payment_service.ORDER_STATUSES) + ")$"
+
+
+@router.get("/payments", response_model=list[AdminPaymentOrderSchema])
+def list_payments(
+    status: str | None = Query(default=None, pattern=_ORDER_STATUS_PATTERN),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    """Crypto payment orders, newest first — `status=submitted` for the ones to check."""
+    return [
+        payment_service.serialize_order(order, include_customer=True)
+        for order in payment_service.list_orders_for_admin(db, status)
+    ]
+
+
+@router.get("/payments/pending-count")
+def pending_payments_count(db: Session = Depends(get_db)) -> dict:
+    """How many payments customers have marked paid that are waiting for a decision."""
+    return {"count": payment_service.pending_count(db)}
+
+
+@router.post("/payments/{order_id}/confirm", response_model=AdminPaymentOrderSchema)
+def confirm_payment(
+    order_id: str,
+    payload: ConfirmPaymentRequestSchema,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin_user),
+) -> dict:
+    """Confirm a payment after checking the transaction on the block explorer.
+    Starts, renews or changes the customer's plan straight away."""
+    order = payment_service.confirm_order(db, order_id, admin=current_admin, note=payload.note)
+    return payment_service.serialize_order(order, include_customer=True)
+
+
+@router.post("/payments/{order_id}/reject", response_model=AdminPaymentOrderSchema)
+def reject_payment(
+    order_id: str,
+    payload: RejectPaymentRequestSchema,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin_user),
+) -> dict:
+    """Reject a payment that didn't arrive or doesn't match. The note is shown to the customer."""
+    order = payment_service.reject_order(db, order_id, admin=current_admin, note=payload.note)
+    return payment_service.serialize_order(order, include_customer=True)

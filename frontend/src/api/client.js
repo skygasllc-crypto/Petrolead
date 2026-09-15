@@ -174,6 +174,39 @@ export const api = {
 
   billingMe: () => request("/billing/me"),
 
+  paymentMethods: () => request("/billing/payment-methods"),
+
+  createOrder: (payload) =>
+    request("/billing/orders", { method: "POST", body: JSON.stringify(payload) }),
+
+  listOrders: () => request("/billing/orders"),
+
+  getOrder: (orderId) => request(`/billing/orders/${orderId}`),
+
+  markOrderPaid: (orderId, txHash) =>
+    request(`/billing/orders/${orderId}/paid`, {
+      method: "POST",
+      body: JSON.stringify({ tx_hash: txHash }),
+    }),
+
+  cancelOrder: (orderId) => request(`/billing/orders/${orderId}/cancel`, { method: "POST" }),
+
+  adminListPayments: (status) => request(`/admin/payments${toQuery({ status })}`),
+
+  adminPendingPaymentsCount: () => request("/admin/payments/pending-count"),
+
+  confirmPayment: (orderId, note) =>
+    request(`/admin/payments/${orderId}/confirm`, {
+      method: "POST",
+      body: JSON.stringify({ note: note || undefined }),
+    }),
+
+  rejectPayment: (orderId, note) =>
+    request(`/admin/payments/${orderId}/reject`, {
+      method: "POST",
+      body: JSON.stringify({ note }),
+    }),
+
   setUserPlan: (userId, plan, creditsPerMonth) =>
     request(`/admin/users/${userId}/subscription`, {
       method: "PUT",

@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { ApiError } from "../api/client";
+import { safeNextPath } from "../lib/redirects";
 import Logo from "../components/Logo";
 import ErrorBanner from "../components/ErrorBanner";
 
@@ -12,6 +13,11 @@ export default function Login() {
   const { user, loading, login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
+  // Where to go after logging in: a ?next= link (e.g. from checkout), or the
+  // page a protected route sent the user away from.
+  const next = safeNextPath(searchParams.get("next"));
+  const destination = next || location.state?.from || "/dashboard";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -19,7 +25,7 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false);
 
   if (!loading && user) {
-    return <Navigate to={location.state?.from || "/dashboard"} replace />;
+    return <Navigate to={destination} replace />;
   }
 
   async function handleSubmit(e) {
@@ -28,7 +34,7 @@ export default function Login() {
     setError(null);
     try {
       await login(email, password);
-      navigate(location.state?.from || "/dashboard", { replace: true });
+      navigate(destination, { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong.");
     } finally {
@@ -93,7 +99,10 @@ export default function Login() {
         </div>
         <p className="mt-4 text-center text-sm text-ink-500">
           Don&apos;t have an account?{" "}
-          <Link to="/register" className="text-brand-600 hover:underline">
+          <Link
+            to={next ? `/register?next=${encodeURIComponent(next)}` : "/register"}
+            className="text-brand-600 hover:underline"
+          >
             Create one
           </Link>
         </p>
