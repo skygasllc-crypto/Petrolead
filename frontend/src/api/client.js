@@ -171,6 +171,22 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ is_active: isActive }),
     }),
+
+  billingMe: () => request("/billing/me"),
+
+  setUserPlan: (userId, plan, creditsPerMonth) =>
+    request(`/admin/users/${userId}/subscription`, {
+      method: "PUT",
+      body: JSON.stringify({ plan, credits_per_month: creditsPerMonth }),
+    }),
+
+  removeUserPlan: (userId) => request(`/admin/users/${userId}/subscription`, { method: "DELETE" }),
+
+  adjustUserCredits: (userId, amount, note) =>
+    request(`/admin/users/${userId}/credits`, {
+      method: "POST",
+      body: JSON.stringify({ amount, note: note || undefined }),
+    }),
 };
 
 export { ApiError };

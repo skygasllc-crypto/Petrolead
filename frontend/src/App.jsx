@@ -22,6 +22,7 @@ import SearchHistory from "./pages/SearchHistory";
 import ScheduledSearches from "./pages/ScheduledSearches";
 import Settings from "./pages/Settings";
 import AdminUsers from "./pages/AdminUsers";
+import Billing from "./pages/Billing";
 
 export default function App() {
   return (
@@ -49,6 +50,7 @@ export default function App() {
             <Route path="/emails" element={<Emails />} />
             <Route path="/searches" element={<SearchHistory />} />
             <Route path="/scheduled" element={<ScheduledSearches />} />
+            <Route path="/billing" element={<Billing />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/admin/users" element={<AdminUsers />} />
           </Route>

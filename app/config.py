@@ -68,6 +68,12 @@ class Settings(BaseSettings):
     # admin until you set this.
     admin_emails: str = ""
 
+    # --- Plans & credits ---
+    # When on, every non-admin account needs a plan, spends email credits
+    # on person lookups, and is held to its plan's limits — see
+    # `app.services.billing_service`. Admins are never limited.
+    billing_enforced: bool = True
+
     # --- Logging ---
     log_level: str = "INFO"
 

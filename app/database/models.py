@@ -57,8 +57,63 @@ class User(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
+    # The account's paid plan and credit balance, or None for no plan.
+    subscription: Mapped[Subscription | None] = relationship(
+        back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )
+
     def __repr__(self) -> str:  # pragma: no cover
         return f"<User id={self.id!r} email={self.email!r}>"
+
+
+class Subscription(Base):
+    """A user's plan, email-credit balance and daily usage counter.
+
+    Kept in its own table rather than as columns on `users`, so an existing
+    database picks it up through `init_db()`'s create_all() without a
+    migration. Credits are granted per monthly period and roll over;
+    renewal happens lazily the next time the account is used — see
+    `app.services.billing_service`. Plan limits live in `app.services.plans`.
+    """
+
+    __tablename__ = "subscriptions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True, nullable=False
+    )
+    plan: Mapped[str] = mapped_column(String(50), nullable=False)
+    credits_per_month: Mapped[int] = mapped_column(Integer, nullable=False)
+    credits_balance: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    period_started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    renews_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    # Company discovery searches run on `discovery_day` (a UTC date, ISO
+    # format); the counter starts again when the day changes.
+    discovery_day: Mapped[str | None] = mapped_column(String(10))
+    discovery_searches_today: Mapped[int] = mapped_column(Integer, default=0)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    user: Mapped[User] = relationship(back_populates="subscription")
+
+
+class CreditTransaction(Base):
+    """Audit trail of every credit change: plan grants, monthly renewals,
+    admin adjustments and credits spent on found emails."""
+
+    __tablename__ = "credit_transactions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    delta: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str] = mapped_column(String(50), nullable=False)
+    detail: Mapped[str | None] = mapped_column(String(500))
+    balance_after: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
 
 class Company(Base):

@@ -1,6 +1,7 @@
 import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import Logo from "./Logo";
 import { useAuth } from "../context/AuthContext";
+import { BillingProvider, useBilling } from "../context/BillingContext";
 
 const NAV_ITEMS = [
   { to: "/dashboard", label: "Dashboard", end: true },
@@ -11,6 +12,7 @@ const NAV_ITEMS = [
   { to: "/emails", label: "Emails" },
   { to: "/searches", label: "History" },
   { to: "/scheduled", label: "Scheduled" },
+  { to: "/billing", label: "Plan & Credits" },
   { to: "/settings", label: "Settings" },
 ];
 
@@ -32,7 +34,32 @@ function NavItem({ to, label, end }) {
   );
 }
 
-export default function Layout() {
+function CreditsBadge() {
+  const { billing } = useBilling();
+  if (!billing || billing.exempt) return null;
+  return (
+    <Link
+      to="/billing"
+      className={`hidden items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold sm:inline-flex ${
+        billing.plan
+          ? "border-brand-100 bg-brand-50 text-brand-600 hover:border-brand-500"
+          : "border-status-possible/30 bg-status-possible/10 text-status-possible"
+      }`}
+    >
+      {billing.plan ? (
+        <>
+          <span>{billing.plan_name}</span>
+          <span aria-hidden="true" className="h-3 w-px bg-brand-100" />
+          <span>{billing.credits_balance.toLocaleString()} credits</span>
+        </>
+      ) : (
+        "No plan — choose one"
+      )}
+    </Link>
+  );
+}
+
+function AppShell() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
@@ -53,7 +80,8 @@ export default function Layout() {
             <Logo />
           </Link>
           <div className="flex items-center gap-3">
-            <span className="hidden max-w-[12rem] truncate text-sm text-ink-500 sm:inline">
+            <CreditsBadge />
+            <span className="hidden max-w-[12rem] truncate text-sm text-ink-500 md:inline">
               {user?.full_name || user?.email}
             </span>
             <button
@@ -86,5 +114,13 @@ export default function Layout() {
         </p>
       </footer>
     </div>
+  );
+}
+
+export default function Layout() {
+  return (
+    <BillingProvider>
+      <AppShell />
+    </BillingProvider>
   );
 }

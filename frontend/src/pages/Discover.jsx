@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError } from "../api/client";
+import { useBilling } from "../context/BillingContext";
 import { REGIONS, INDUSTRIES, PRODUCTS, RESULT_LIMITS, COUNTRIES } from "../lib/constants";
 import DiscoveryProgress from "../components/DiscoveryProgress";
 import PreviewResultsTable from "../components/PreviewResultsTable";
@@ -32,6 +33,7 @@ const selectClasses =
   "w-full rounded-md border border-base-600 bg-base-800 px-3 py-2 text-sm text-ink-100 focus:border-brand-500 focus:outline-none";
 
 export default function Discover() {
+  const { refresh: refreshBilling } = useBilling();
   const [form, setForm] = useState(INITIAL_FORM);
   const [status, setStatus] = useState("idle"); // idle | loading | done | error
   const [error, setError] = useState(null);
@@ -87,6 +89,8 @@ export default function Discover() {
       setError(err instanceof ApiError ? err.message : "Something went wrong.");
       setStatus("error");
     }
+    // A completed search counts against the plan's daily allowance.
+    refreshBilling();
   }
 
   const filteredCompanies = useMemo(() => {

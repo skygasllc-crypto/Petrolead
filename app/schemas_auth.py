@@ -6,6 +6,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
+from app.schemas_billing import SubscriptionSchema
+
 MIN_PASSWORD_LENGTH = 8
 # bcrypt's hard cap is 72 *bytes* — passing more raises ValueError (as of
 # bcrypt 4+) instead of the old silent-truncation behavior. Enforced here as
@@ -73,6 +75,7 @@ class AdminUserSchema(BaseModel):
     is_active: bool
     is_admin: bool
     created_at: datetime
+    subscription: SubscriptionSchema | None = None
 
 
 class UpdateUserStatusRequestSchema(BaseModel):

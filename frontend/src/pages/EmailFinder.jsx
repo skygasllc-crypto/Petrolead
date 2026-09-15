@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, ApiError } from "../api/client";
+import { useBilling } from "../context/BillingContext";
 import ValidityBadge from "../components/ValidityBadge";
 import Icon from "../components/marketing/Icon";
 
@@ -39,6 +40,7 @@ function withScheme(url) {
 
 function useLookup() {
   const [state, setState] = useState({ status: "idle", attempt: 0 });
+  const { refresh: refreshBilling } = useBilling();
   async function run(fn) {
     const attempt = state.attempt + 1;
     setState({ status: "loading", attempt });
@@ -47,6 +49,8 @@ function useLookup() {
     } catch (err) {
       setState({ status: "error", attempt, error: errorMessage(err) });
     }
+    // A lookup that finds an email spends a credit — keep the header balance current.
+    refreshBilling();
   }
   return [state, run];
 }

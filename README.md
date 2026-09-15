@@ -206,6 +206,8 @@ Copy `.env.example` to `.env` and fill in real values. **Never commit `.env`.**
 | `CORS_ORIGINS` | Comma-separated list of allowed frontend origins. |
 | `SECRET_KEY` | Signs login session tokens. **The shipped default is insecure and dev-only** — generate a real one: `python -c "import secrets; print(secrets.token_hex(32))"`. |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Login session lifetime. Default 10080 (1 week). |
+| `ADMIN_EMAILS` | Comma-separated emails that get admin access (the Users page, plan and credit management). Applied on every register/login; only grants, never revokes. |
+| `BILLING_ENFORCED` | Default `true`: every non-admin account needs a plan, spends one email credit per person lookup that finds an email, and is held to its plan's limits (see "Plans & credits" below). Admins are never limited. `false` switches all limits off. |
 | `SEARCH_PROVIDER` | `mock` \| `google_cse` \| `bing` \| `serpapi` \| `searchapi_io` \| `serper` |
 | `GOOGLE_CSE_API_KEY` / `GOOGLE_CSE_ENGINE_ID` | Required for `google_cse`. Get from [Programmable Search Engine](https://programmablesearchengine.google.com/). Note: Google requires a billing account linked to the project before the API will serve requests at all, even within the free 100/day quota. |
 | `BING_SEARCH_API_KEY` | Required for `bing`. Azure Cognitive Services Bing Search resource key — also requires a card on the Azure account. |
@@ -332,6 +334,14 @@ accepting either `False` or `None`.)
 | `PATCH` | `/api/saved-searches/{id}?is_active=` | Pause/resume a saved search. |
 | `DELETE` | `/api/saved-searches/{id}` | Delete a saved search. |
 | `POST` | `/api/saved-searches/run-due` | Manually run whichever saved searches are currently due (no worker required). |
+| `POST` | `/api/contacts/bulk-lookup` | Look up to 25 people at once — each item is `{"url": "linkedin.com/in/..."}` or `{"full_name", "company_name"}`. **Preview only.** |
+| `POST` | `/api/emails/verify` | Email Verifier — body: `{"emails": [...]}` (up to 50). Checks each address's format, then whether its domain has mail (MX) records; never contacts the mailbox. |
+| `GET` | `/api/billing/me` | The current user's plan, credit balance, renewal date, today's search count and plan limits. |
+| `GET` | `/api/admin/users` | *(admin)* Every account, with its plan and credit balance. |
+| `PATCH` | `/api/admin/users/{id}` | *(admin)* Block/unblock — body: `{"is_active": bool}`. |
+| `PUT` | `/api/admin/users/{id}/subscription` | *(admin)* Put a user on a plan — body: `{"plan", "credits_per_month"}`. A new plan grants its first month of credits immediately. |
+| `DELETE` | `/api/admin/users/{id}/subscription` | *(admin)* Remove a user's plan and remaining credits. |
+| `POST` | `/api/admin/users/{id}/credits` | *(admin)* Add or remove credits — body: `{"amount", "note"}`. The balance never goes below zero. |
 
 All request/response bodies are validated with Pydantic; invalid input
 returns `422` with a structured error body. Unexpected server errors return
@@ -346,6 +356,20 @@ shared workspace, not partitioned per user (see `app/database/models.py`'s
 `User` docstring). Sessions are stateless JWTs
 (`ACCESS_TOKEN_EXPIRE_MINUTES`, default 1 week) — there's no server-side
 session store, so a token can't be revoked before it expires.
+
+**Plans & credits.** With `BILLING_ENFORCED=true` (the default), a new
+account has no plan and can't use the lookup tools until an admin assigns
+one on the Users page — there's no online checkout yet. Plans and their
+limits are defined in `app/services/plans.py` (mirroring the public pricing
+page): one email credit is spent only when a person lookup (LinkedIn
+profile, name + company, or a bulk line) returns a business email; website
+extraction and the Email Verifier are free; each plan caps company
+discovery searches per day and results per search, and bulk lookup and
+CSV/Excel export need Professional or Enterprise. Credits are granted per
+monthly period and roll over — renewal happens the next time the account is
+used. Every change is recorded in the `credit_transactions` table. Admins
+are never limited. Saved searches and exports aren't limited per user,
+because saved data is still one shared workspace.
 
 ---
 

@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.admin import router as admin_router
 from app.api.auth import router as auth_router
+from app.api.billing import router as billing_router
 from app.api.companies import router as companies_router
 from app.api.emails import router as emails_router
 from app.api.saved_searches import router as saved_searches_router
@@ -18,6 +19,7 @@ from app.config import get_settings
 from app.core.deps import get_current_admin_user, get_current_user
 from app.core.logging import setup_logging
 from app.database.connection import init_db
+from app.services.billing_service import BillingError
 
 setup_logging()
 logger = logging.getLogger("petrolead.main")
@@ -56,7 +58,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -66,6 +68,12 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     return JSONResponse(
         status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers
     )
+
+
+@app.exception_handler(BillingError)
+async def billing_exception_handler(request: Request, exc: BillingError) -> JSONResponse:
+    # A plan or credit limit — the message tells the user what to do next.
+    return JSONResponse(status_code=exc.status_code, content={"detail": str(exc)})
 
 
 @app.exception_handler(Exception)
@@ -83,6 +91,7 @@ app.include_router(auth_router, prefix=settings.api_v1_prefix)
 _auth_required = [Depends(get_current_user)]
 app.include_router(companies_router, prefix=settings.api_v1_prefix, dependencies=_auth_required)
 app.include_router(emails_router, prefix=settings.api_v1_prefix, dependencies=_auth_required)
+app.include_router(billing_router, prefix=settings.api_v1_prefix, dependencies=_auth_required)
 app.include_router(
     saved_searches_router, prefix=settings.api_v1_prefix, dependencies=_auth_required
 )

@@ -22,6 +22,9 @@ os.environ["SEARCH_PROVIDER"] = "mock"
 # behavior (e.g. an admin test's own dependency-override "current admin"
 # accidentally matching that address) — tests set admin status explicitly.
 os.environ["ADMIN_EMAILS"] = ""
+# Plan and credit limits are off for the suite as a whole — tests aren't
+# about billing unless they turn it on themselves (see tests/test_billing.py).
+os.environ["BILLING_ENFORCED"] = "false"
 
 import pytest
 from sqlalchemy import create_engine

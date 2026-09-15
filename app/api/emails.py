@@ -12,10 +12,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.core.deps import get_current_user
 from app.database.connection import get_db
+from app.database.models import User
 from app.discovery.emails import verify_emails as verify_email_addresses
 from app.schemas import PaginatedEmailsSchema, VerifyEmailsRequestSchema, VerifyEmailsResponseSchema
-from app.services import email_service
+from app.services import billing_service, email_service
 
 logger = logging.getLogger("petrolead.api.emails")
 
@@ -52,11 +54,16 @@ def get_emails(
 
 
 @router.post("/emails/verify", response_model=VerifyEmailsResponseSchema)
-async def verify_emails(payload: VerifyEmailsRequestSchema) -> VerifyEmailsResponseSchema:
+async def verify_emails(
+    payload: VerifyEmailsRequestSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> VerifyEmailsResponseSchema:
     """Email Verifier: check each address's format, then whether its domain
     has mail (MX) records. Nothing is saved and no mailbox is ever
     contacted — `valid` means the domain can receive mail, not that the
-    specific mailbox exists."""
+    specific mailbox exists. Included in every plan; doesn't use credits."""
+    billing_service.require_plan(db, current_user)
     results = await verify_email_addresses(payload.emails)
     counts = Counter(result["status"] for result in results)
     return VerifyEmailsResponseSchema(
@@ -76,12 +83,14 @@ def export_emails(
     industry: str | None = None,
     has_exported: bool | None = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> StreamingResponse:
     """Export emails matching the given filters as CSV or Excel.
 
     Every exported email is stamped with `exported_at` so it can be told
     apart from fresh, not-yet-exported ones (`has_exported=false` filter).
     """
+    billing_service.require_feature(db, current_user, "export", "CSV & Excel export")
     try:
         emails = email_service.export_emails(
             db,

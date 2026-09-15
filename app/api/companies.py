@@ -12,8 +12,10 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.core.deps import get_current_user
 from app.database.connection import get_db
-from app.database.models import SearchStatus
+from app.database.models import SearchStatus, User
+from app.discovery.profile_lookup import detect_personal_profile_platform
 from app.schemas import (
     BulkContactLookupRequestSchema,
     BulkContactLookupResponseSchema,
@@ -29,7 +31,7 @@ from app.schemas import (
     SaveCompanyRequestSchema,
     SearchQuerySchema,
 )
-from app.services import company_service
+from app.services import billing_service, company_service
 
 logger = logging.getLogger("petrolead.api.companies")
 
@@ -91,12 +93,14 @@ def export_companies(
     has_exported: bool | None = None,
     search: str | None = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> StreamingResponse:
     """Export companies matching the given filters as CSV or Excel (Phase 8).
 
     Every exported company is stamped with `exported_at` so it can be told
     apart from fresh, not-yet-exported leads (`has_exported=false` filter).
     """
+    billing_service.require_feature(db, current_user, "export", "CSV & Excel export")
     try:
         companies = company_service.export_companies(
             db,
@@ -146,12 +150,17 @@ def get_company(company_id: str, db: Session = Depends(get_db)) -> CompanyDetail
 
 @router.post("/discover", response_model=DiscoverResponseSchema)
 async def discover_companies(
-    payload: DiscoverRequestSchema, db: Session = Depends(get_db)
+    payload: DiscoverRequestSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> DiscoverResponseSchema:
     """Run a discovery search. Results are a PREVIEW only — nothing is
     saved to your Companies list until you explicitly save a result via
-    `POST /companies/save` (or `/save-bulk` for several at once)."""
+    `POST /companies/save` (or `/save-bulk` for several at once).
+
+    Counts against the plan's daily search allowance once it completes."""
     settings = get_settings()
+    billing_service.check_discovery(db, current_user, payload.limit)
     try:
         search_query, previews = await company_service.discover_preview(db, payload)
     except Exception as exc:
@@ -166,6 +175,7 @@ async def discover_companies(
             detail=search_query.status_message or "Discovery failed. Please try again.",
         )
 
+    billing_service.record_discovery(db, current_user)
     return DiscoverResponseSchema(
         search_id=search_query.id,
         status=search_query.status.value,
@@ -180,16 +190,28 @@ async def discover_companies(
 
 @router.post("/discover-url", response_model=DiscoveredCompanyPreviewSchema)
 async def discover_company_from_url(
-    payload: DiscoverUrlRequestSchema, db: Session = Depends(get_db)
+    payload: DiscoverUrlRequestSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> DiscoveredCompanyPreviewSchema:
     """Paste-a-link quick lookup: fetch one URL and preview whatever public
     contact info is on it. This is a PREVIEW only — save it explicitly via
     `POST /companies/save` if you want to keep it. Works best for a
     company's own website — a raw social-media profile URL will usually
     come back with a clear 422 explaining why (those pages are typically
-    login-gated)."""
+    login-gated).
+
+    A LinkedIn profile lookup needs a credit and spends one when it finds a
+    business email; extracting a company website's contacts is free."""
+    url = str(payload.url)
+    is_person_lookup = detect_personal_profile_platform(url) is not None
+    if is_person_lookup:
+        billing_service.require_credits(db, current_user)
+    else:
+        billing_service.require_plan(db, current_user)
+
     try:
-        preview = await company_service.discover_from_url_preview(db, str(payload.url))
+        preview = await company_service.discover_from_url_preview(db, url)
     except company_service.UrlLookupError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
@@ -197,12 +219,17 @@ async def discover_company_from_url(
         raise HTTPException(
             status_code=502, detail="Could not process this link right now. Please try again."
         ) from exc
+
+    if is_person_lookup and preview["emails"]:
+        billing_service.spend_credits(db, current_user, 1, f"Email found for {url}")
     return preview
 
 
 @router.post("/contacts/bulk-lookup", response_model=BulkContactLookupResponseSchema)
 async def bulk_contact_lookup(
-    payload: BulkContactLookupRequestSchema, db: Session = Depends(get_db)
+    payload: BulkContactLookupRequestSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> BulkContactLookupResponseSchema:
     """Look up several people at once — each item is either a LinkedIn
     profile URL or a plain name + company pair (same underlying lookup as
@@ -210,9 +237,24 @@ async def bulk_contact_lookup(
     failing never affects the others, and results come back in the same
     order as submitted. PREVIEW only — save individual results explicitly
     via `POST /companies/save` (or `/save-bulk`) if you want to keep them.
+
+    A single item is a plain person lookup (every plan); two or more need
+    a plan with bulk lookup. Enough credits for every item are required up
+    front, but only items that find a business email spend one.
     """
+    if len(payload.items) > 1:
+        billing_service.require_feature(db, current_user, "bulk_lookup", "Bulk lookup")
+    billing_service.require_credits(db, current_user, needed=len(payload.items))
+
     results = await company_service.bulk_contact_lookup_preview(db, payload.items)
     succeeded = sum(1 for r in results if r["success"])
+    emails_found = sum(1 for r in results if r["success"] and r["preview"]["emails"])
+    billing_service.spend_credits(
+        db,
+        current_user,
+        emails_found,
+        f"Bulk lookup: {emails_found} of {len(results)} emails found",
+    )
     return BulkContactLookupResponseSchema(
         results=[
             BulkContactLookupResultSchema(
