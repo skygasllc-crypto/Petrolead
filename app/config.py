@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     bing_search_api_key: str | None = None
     serpapi_api_key: str | None = None
     searchapi_io_api_key: str | None = None
+    serper_api_key: str | None = None
     search_provider: str = "mock"
 
     # --- Contact-data enrichment (optional) ---

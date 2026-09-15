@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import io
 import logging
+from collections import Counter
 
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -12,7 +13,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database.connection import get_db
-from app.schemas import PaginatedEmailsSchema
+from app.discovery.emails import verify_emails as verify_email_addresses
+from app.schemas import PaginatedEmailsSchema, VerifyEmailsRequestSchema, VerifyEmailsResponseSchema
 from app.services import email_service
 
 logger = logging.getLogger("petrolead.api.emails")
@@ -47,6 +49,22 @@ def get_emails(
         raise HTTPException(status_code=500, detail="Unable to load emails right now.") from exc
 
     return PaginatedEmailsSchema(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.post("/emails/verify", response_model=VerifyEmailsResponseSchema)
+async def verify_emails(payload: VerifyEmailsRequestSchema) -> VerifyEmailsResponseSchema:
+    """Email Verifier: check each address's format, then whether its domain
+    has mail (MX) records. Nothing is saved and no mailbox is ever
+    contacted — `valid` means the domain can receive mail, not that the
+    specific mailbox exists."""
+    results = await verify_email_addresses(payload.emails)
+    counts = Counter(result["status"] for result in results)
+    return VerifyEmailsResponseSchema(
+        results=results,
+        valid_count=counts["valid"],
+        invalid_count=counts["invalid_format"] + counts["no_mail_server"],
+        unknown_count=counts["unknown"],
+    )
 
 
 @router.get("/emails/export")

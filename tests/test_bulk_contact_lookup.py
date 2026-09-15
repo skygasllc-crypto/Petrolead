@@ -167,6 +167,38 @@ class TestBulkContactLookupNameAndCompany:
         assert preview["website"] == "https://falconpetro.example"
         assert preview["emails"] == [{"email": "jane.doe@falconpetro.example", "is_valid": True}]
 
+    def test_item_without_a_found_email_fails_and_others_still_succeed(self, client, monkeypatch):
+        fake_provider = _FakeRealProvider(
+            snippet_title="unused",
+            website_url="https://falconpetro.example/about",
+        )
+        monkeypatch.setattr(company_service, "get_search_provider", lambda settings: fake_provider)
+
+        async def fake_find_person_email(*, domain, full_name, settings):
+            if full_name == "Jane Doe":
+                return {"email": "jane.doe@falconpetro.example", "is_valid": True}
+            return None
+
+        monkeypatch.setattr(company_service, "find_person_email", fake_find_person_email)
+
+        response = client.post(
+            "/api/contacts/bulk-lookup",
+            json={
+                "items": [
+                    {"full_name": "Jane Doe", "company_name": "Falcon Petroleum"},
+                    {"full_name": "John Roe", "company_name": "Falcon Petroleum"},
+                ]
+            },
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["succeeded_count"] == 1
+        assert body["failed_count"] == 1
+        assert body["results"][0]["success"] is True
+        assert body["results"][1]["success"] is False
+        assert body["results"][1]["preview"] is None
+        assert "No business email found for John Roe" in body["results"][1]["error"]
+
     def test_mixed_url_and_name_company_items_in_one_request(self, client):
         response = client.post(
             "/api/contacts/bulk-lookup",

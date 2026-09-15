@@ -26,6 +26,19 @@ _LINKEDIN_PERSONAL_RE = re.compile(
 # + platform name is stripped first; " - " then splits name / headline.
 _TRAILING_PLATFORM_RE = re.compile(r"\s*[|\-–—]\s*linkedin\s*$", re.IGNORECASE)
 _TITLE_AT_COMPANY_RE = re.compile(r"^(?P<title>.+?)\s+at\s+(?P<company>.+)$", re.IGNORECASE)
+# Search engines cut long titles/snippets off with an ellipsis — a company
+# name that ends in one is incomplete and must not be reported.
+_TRUNCATED_RE = re.compile(r"(?:\.\.\.|…)$")
+# Google's LinkedIn snippets often carry an explicit, labeled employer field:
+# "Headline · Experience: Northern Pipeline Construction · Location: ...".
+# Unlike free headline text this is unambiguous, so it's safe to trust.
+_SNIPPET_EXPERIENCE_RE = re.compile(r"\bExperience:\s*(?P<company>[^·•|]+?)\s*(?:[·•|]|$)")
+
+
+def _complete(value: str | None) -> str | None:
+    if not value or _TRUNCATED_RE.search(value):
+        return None
+    return value
 
 
 def detect_personal_profile_platform(url: str) -> str | None:
@@ -49,7 +62,7 @@ class ParsedProfile:
     company_name: str | None
 
 
-def parse_profile_snippet(raw_title: str) -> ParsedProfile | None:
+def parse_profile_snippet(raw_title: str, snippet: str = "") -> ParsedProfile | None:
     """Best-effort parse of a search-result title for a profile URL.
 
     Deliberately conservative about the `company_name` it returns:
@@ -60,6 +73,11 @@ def parse_profile_snippet(raw_title: str) -> ParsedProfile | None:
     ("{Name} - {Something}") is genuinely ambiguous (that "something"
     could just as easily be a school or a tagline as an employer), so
     that case is left as name-only rather than guessed.
+
+    When the title names no company, falls back to an explicit
+    "Experience: {Company}" field in the result's `snippet` text — a
+    labeled employer, not a guess. A company cut off by the search engine
+    ("Falcon Petrol...") is never reported.
 
     Returns None if the title doesn't look like a name/headline snippet at
     all (e.g. the platform's generic homepage title came back instead).
@@ -86,6 +104,12 @@ def parse_profile_snippet(raw_title: str) -> ParsedProfile | None:
             company = segments[2]
         # else: only a 2-segment snippet with no explicit "at Company" —
         # too ambiguous to guess a company from, left as name-only.
+
+    company = _complete(company)
+    if company is None:
+        experience = _SNIPPET_EXPERIENCE_RE.search(snippet)
+        if experience:
+            company = _complete(experience.group("company").strip())
 
     return ParsedProfile(name=name, title=title, company_name=company)
 

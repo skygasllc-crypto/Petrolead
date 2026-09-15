@@ -206,11 +206,12 @@ Copy `.env.example` to `.env` and fill in real values. **Never commit `.env`.**
 | `CORS_ORIGINS` | Comma-separated list of allowed frontend origins. |
 | `SECRET_KEY` | Signs login session tokens. **The shipped default is insecure and dev-only** — generate a real one: `python -c "import secrets; print(secrets.token_hex(32))"`. |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Login session lifetime. Default 10080 (1 week). |
-| `SEARCH_PROVIDER` | `mock` \| `google_cse` \| `bing` \| `serpapi` \| `searchapi_io` |
+| `SEARCH_PROVIDER` | `mock` \| `google_cse` \| `bing` \| `serpapi` \| `searchapi_io` \| `serper` |
 | `GOOGLE_CSE_API_KEY` / `GOOGLE_CSE_ENGINE_ID` | Required for `google_cse`. Get from [Programmable Search Engine](https://programmablesearchengine.google.com/). Note: Google requires a billing account linked to the project before the API will serve requests at all, even within the free 100/day quota. |
 | `BING_SEARCH_API_KEY` | Required for `bing`. Azure Cognitive Services Bing Search resource key — also requires a card on the Azure account. |
 | `SERPAPI_API_KEY` | Required for `serpapi`. From [serpapi.com](https://serpapi.com/). |
 | `SEARCHAPI_IO_API_KEY` | Required for `searchapi_io`. From [searchapi.io](https://www.searchapi.io/) — free tier (100 requests) with no credit card required at signup, the least friction of the four if you want real results without linking payment info. |
+| `SERPER_API_KEY` | Required for `serper`. From [serper.dev](https://serper.dev/) — Google results, 2,500 free queries with no credit card, then prepaid credit packs (the lowest cost per query of the providers here). |
 | `HUNTER_IO_API_KEY` | Optional. From [hunter.io](https://hunter.io/) — enriches a "paste a LinkedIn profile link" preview with a verified business email for that specific person, once a company domain is confirmed. Everything else works without it. |
 | `HTTP_TIMEOUT_SECONDS`, `MAX_CONCURRENT_FETCHES` | Extraction/enrichment tuning. |
 | `REDIS_URL` | Only needed for Phase 10's Celery worker/beat. |

@@ -14,6 +14,7 @@ from app.discovery.search import (
     MockSearchProvider,
     SearchApiIoProvider,
     SerpApiProvider,
+    SerperProvider,
     get_search_provider,
 )
 
@@ -47,3 +48,8 @@ class TestGetSearchProvider:
         provider = get_search_provider(_settings(search_provider="searchapi_io"))
         assert isinstance(provider, SearchApiIoProvider)
         assert provider.name == "searchapi_io"
+
+    def test_resolves_serper(self):
+        provider = get_search_provider(_settings(search_provider="serper"))
+        assert isinstance(provider, SerperProvider)
+        assert provider.name == "serper"

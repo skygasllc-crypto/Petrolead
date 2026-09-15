@@ -169,6 +169,61 @@ class SearchResultItem:
     snippet: str = ""
 
 
+class SearchProviderError(RuntimeError):
+    """A search provider request failed.
+
+    The message deliberately never includes the request URL: Google CSE,
+    SerpApi and SearchAPI.io all carry the API key as a query parameter,
+    and httpx's own error messages embed the full URL — which is how keys
+    used to end up in the server logs.
+    """
+
+
+class SearchQuotaExceededError(SearchProviderError):
+    """The provider answered HTTP 429 — out of credits or rate-limited.
+    Retrying further queries in the same run is pointless (each one fails
+    the same way), so sources stop at the first one."""
+
+
+def _quota_exceeded_message(provider_name: str) -> str:
+    return (
+        f"The search provider ({provider_name}) refused the request: quota or rate limit "
+        "exceeded (HTTP 429). Check your plan's remaining credits, or switch "
+        "SEARCH_PROVIDER in .env to another configured provider."
+    )
+
+
+async def _fetch_json(
+    provider_name: str,
+    url: str,
+    *,
+    timeout: float,
+    method: str = "GET",
+    params: dict | None = None,
+    json: dict | None = None,
+    headers: dict | None = None,
+) -> dict:
+    """Call a provider endpoint and return its JSON body, translating every
+    failure into a `SearchProviderError` that is safe to log. `from None`
+    drops the original httpx exception from the traceback, since its
+    message contains the key-bearing URL."""
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.request(
+                method, url, params=params, json=json, headers=headers
+            )
+    except httpx.HTTPError as exc:
+        raise SearchProviderError(
+            f"{provider_name}: request failed ({type(exc).__name__})"
+        ) from None
+
+    if response.status_code == 429:
+        raise SearchQuotaExceededError(_quota_exceeded_message(provider_name))
+    if response.is_error:
+        raise SearchProviderError(f"{provider_name}: HTTP {response.status_code}")
+    return response.json()
+
+
 class SearchProvider(ABC):
     """Base interface every web-search backend implements."""
 
@@ -205,11 +260,7 @@ class GoogleCSEProvider(SearchProvider):
             "q": query,
             "num": min(limit, 10),
         }
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.get(self.ENDPOINT, params=params)
-            response.raise_for_status()
-            data = response.json()
-
+        data = await _fetch_json(self.name, self.ENDPOINT, params=params, timeout=self._timeout)
         items = data.get("items", [])
         return [
             SearchResultItem(
@@ -237,11 +288,9 @@ class BingSearchProvider(SearchProvider):
 
         headers = {"Ocp-Apim-Subscription-Key": self._api_key}
         params = {"q": query, "count": limit}
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.get(self.ENDPOINT, params=params, headers=headers)
-            response.raise_for_status()
-            data = response.json()
-
+        data = await _fetch_json(
+            self.name, self.ENDPOINT, params=params, timeout=self._timeout, headers=headers
+        )
         items = data.get("webPages", {}).get("value", [])
         return [
             SearchResultItem(
@@ -268,11 +317,7 @@ class SerpApiProvider(SearchProvider):
             raise RuntimeError("SerpApi is not configured (missing API key).")
 
         params = {"q": query, "api_key": self._api_key, "num": limit}
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.get(self.ENDPOINT, params=params)
-            response.raise_for_status()
-            data = response.json()
-
+        data = await _fetch_json(self.name, self.ENDPOINT, params=params, timeout=self._timeout)
         items = data.get("organic_results", [])
         return [
             SearchResultItem(
@@ -304,14 +349,50 @@ class SearchApiIoProvider(SearchProvider):
             raise RuntimeError("SearchAPI.io is not configured (missing API key).")
 
         params = {"engine": "google", "q": query, "api_key": self._api_key}
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.get(self.ENDPOINT, params=params)
-            response.raise_for_status()
-            data = response.json()
+        data = await _fetch_json(self.name, self.ENDPOINT, params=params, timeout=self._timeout)
 
         # `num` is no longer honored by the underlying Google SERP (fixed at
         # 10 results per page as of Sept 2025) — trim to `limit` client-side.
         items = data.get("organic_results", [])
+        return [
+            SearchResultItem(
+                title=item.get("title", ""),
+                url=item.get("link", ""),
+                snippet=item.get("snippet", ""),
+            )
+            for item in items[:limit]
+        ]
+
+
+class SerperProvider(SearchProvider):
+    """Serper.dev (https://serper.dev/) — hosted Google SERP API.
+
+    Requires SERPER_API_KEY. 2,500 free queries with no credit card, then
+    prepaid credit packs. The key travels in a header, never the URL.
+    `num` isn't sent: Google returns 10 results per page regardless, and
+    Serper bills a request asking for more than 10 as two credits.
+    """
+
+    name = "serper"
+    ENDPOINT = "https://google.serper.dev/search"
+
+    def __init__(self, settings: Settings):
+        self._api_key = settings.serper_api_key
+        self._timeout = settings.http_timeout_seconds
+
+    async def search(self, query: str, *, limit: int = 10) -> list[SearchResultItem]:
+        if not self._api_key:
+            raise RuntimeError("Serper is not configured (missing API key).")
+
+        data = await _fetch_json(
+            self.name,
+            self.ENDPOINT,
+            method="POST",
+            json={"q": query},
+            headers={"X-API-KEY": self._api_key},
+            timeout=self._timeout,
+        )
+        items = data.get("organic", [])
         return [
             SearchResultItem(
                 title=item.get("title", ""),
@@ -412,6 +493,7 @@ _PROVIDERS: dict[str, type[SearchProvider]] = {
     "bing": BingSearchProvider,
     "serpapi": SerpApiProvider,
     "searchapi_io": SearchApiIoProvider,
+    "serper": SerperProvider,
     "mock": MockSearchProvider,
 }
 

@@ -37,7 +37,11 @@ from app.discovery.profile_lookup import (
     parse_profile_snippet,
 )
 from app.discovery.relevance import score_relevance
-from app.discovery.search import B2B_DIRECTORY_DOMAINS, get_search_provider
+from app.discovery.search import (
+    B2B_DIRECTORY_DOMAINS,
+    SearchQuotaExceededError,
+    get_search_provider,
+)
 from app.discovery.sources import B2BSource, SearchSource, SocialSource, WebsiteSource
 from app.discovery.types import DiscoveredCompany, DiscoveryRequest
 from app.schemas import DiscoverRequestSchema
@@ -410,7 +414,11 @@ async def _execute_sources(
     `search_query` FAILED) if the sources themselves raised — a per-source
     failure inside `SearchSource.discover()` etc. is already caught there
     and just yields fewer candidates, so reaching an exception here means
-    something more fundamental broke (e.g. a misconfigured provider)."""
+    something more fundamental broke (e.g. a misconfigured provider).
+
+    The exception is the provider's quota running out: a source raises it
+    only when it found nothing. The search fails, with the quota message
+    shown to the user, only if no source returned any candidates."""
     logger.info(
         "Search %s started: region=%s country=%s city=%s industry=%s products=%s keywords=%s",
         search_query.id,
@@ -430,13 +438,31 @@ async def _execute_sources(
         sources.append(B2BSource())
 
     try:
-        candidate_lists = await asyncio.gather(*(s.discover(discovery_request) for s in sources))
-        return [candidate for batch in candidate_lists for candidate in batch]
+        batches = await asyncio.gather(
+            *(s.discover(discovery_request) for s in sources), return_exceptions=True
+        )
+        candidates: list[DiscoveredCompany] = []
+        quota_errors: list[SearchQuotaExceededError] = []
+        for batch in batches:
+            if isinstance(batch, SearchQuotaExceededError):
+                quota_errors.append(batch)
+            elif isinstance(batch, BaseException):
+                raise batch
+            else:
+                candidates.extend(batch)
+        if quota_errors and not candidates:
+            raise quota_errors[0]
+        return candidates
     except Exception as exc:  # noqa: BLE001 — a failed job must not crash the API
-        logger.exception("Search %s failed during discovery", search_query.id)
+        if isinstance(exc, SearchQuotaExceededError):
+            logger.warning("Search %s failed: %s", search_query.id, exc)
+            status_message = str(exc)
+        else:
+            logger.exception("Search %s failed during discovery", search_query.id)
+            status_message = "Discovery failed. See server logs for details."
         search_query.status = SearchStatus.FAILED
         search_query.error = str(exc)
-        search_query.status_message = "Discovery failed. See server logs for details."
+        search_query.status_message = status_message
         search_query.completed_at = utcnow()
         db.commit()
         db.refresh(search_query)
@@ -657,6 +683,24 @@ async def _resolve_domain_and_email(
     return domain, ([found] if found else [])
 
 
+def _require_email(
+    provider, settings, emails: list[dict], *, domain: str | None, full_name: str, company_name: str
+) -> None:
+    """A person lookup exists to find an email — a contact without one is
+    not a result. Raises `UrlLookupError` explaining which step came up
+    empty. Mock mode is exempt: it never looks up (or fabricates) emails,
+    so requiring one would make every offline lookup fail."""
+    if emails or provider.name == "mock":
+        return
+    if not settings.hunter_io_api_key:
+        reason = "email lookup isn't configured (HUNTER_IO_API_KEY is not set)"
+    elif not domain:
+        reason = f"no official website could be found for {company_name} to look it up against"
+    else:
+        reason = f"Hunter.io had no confident match at {domain}"
+    raise UrlLookupError(f"No business email found for {full_name} — {reason}. Skipped.")
+
+
 async def _preview_from_profile_snippet(db: Session, url: str, *, platform: str) -> dict:
     """Fallback for a personal social-profile URL: the page itself is
     login-gated and never fetched. Instead, ask the configured
@@ -675,22 +719,48 @@ async def _preview_from_profile_snippet(db: Session, url: str, *, platform: str)
 
     try:
         results = await provider.search(query, limit=3)
+    except SearchQuotaExceededError as exc:
+        # Not the page being login-gated: the lookup never got an answer.
+        raise UrlLookupError(str(exc)) from exc
     except Exception:
         logger.warning("Profile snippet lookup failed for url=%r", url, exc_info=True)
         results = []
 
     parsed = None
+    found_name = None
     for result in results:
-        parsed = parse_profile_snippet(result.title)
+        parsed = parse_profile_snippet(result.title, result.snippet)
         if parsed and parsed.company_name:
             break
+        if parsed and found_name is None:
+            found_name = parsed.name
         parsed = None
 
     if parsed is None:
-        raise UrlLookupError(_NOTHING_USABLE_MESSAGE)
+        if found_name:
+            raise UrlLookupError(
+                f"Found this LinkedIn profile ({found_name}), but its public search "
+                "listing doesn't name a current employer, so there's no company to "
+                "attach them to. If you know where they work, enter "
+                '"Full Name, Company Name" in Bulk Contact Lookup instead.'
+            )
+        raise UrlLookupError(
+            "No public search listing was found for this LinkedIn profile. "
+            "LinkedIn profiles are login-gated and never fetched directly — only "
+            "what a search engine has indexed can be used. If you know where they "
+            'work, enter "Full Name, Company Name" in Bulk Contact Lookup instead.'
+        )
 
     domain, emails = await _resolve_domain_and_email(
         provider, settings, company_name=parsed.company_name, full_name=parsed.name
+    )
+    _require_email(
+        provider,
+        settings,
+        emails,
+        domain=domain,
+        full_name=parsed.name,
+        company_name=parsed.company_name,
     )
 
     candidate = DiscoveredCompany(
@@ -718,13 +788,15 @@ async def _preview_from_name_and_company(db: Session, *, full_name: str, company
     """Bulk-lookup path for an item given as a plain name + company (no
     profile URL to derive them from) — goes straight to the same
     domain-resolution + Hunter.io enrichment the profile-snippet fallback
-    uses. Always "succeeds" with at least the name/company as given, even
-    when no domain/email could be resolved — enrichment failing is not the
-    same as the lookup failing, same as the URL-based path."""
+    uses. Fails (via `_require_email`) when no email could be found, same as
+    the URL-based path."""
     settings = get_settings()
     provider = get_search_provider(settings)
     domain, emails = await _resolve_domain_and_email(
         provider, settings, company_name=company_name, full_name=full_name
+    )
+    _require_email(
+        provider, settings, emails, domain=domain, full_name=full_name, company_name=company_name
     )
 
     candidate = DiscoveredCompany(

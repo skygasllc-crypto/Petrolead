@@ -35,7 +35,12 @@ from urllib.parse import urlparse
 from app.config import Settings, get_settings
 from app.discovery.contacts import SOCIAL_DOMAINS
 from app.discovery.extractor import company_from_search_result, enrich_from_website
-from app.discovery.search import QueryBuilder, SearchProvider, get_search_provider
+from app.discovery.search import (
+    QueryBuilder,
+    SearchProvider,
+    SearchQuotaExceededError,
+    get_search_provider,
+)
 from app.discovery.types import DiscoveredCompany, DiscoveryRequest
 
 logger = logging.getLogger("petrolead.discovery.sources")
@@ -85,6 +90,15 @@ class SearchSource(BaseSource):
                 break
             try:
                 results = await self._provider.search(query, limit=per_query_limit)
+            except SearchQuotaExceededError as exc:
+                # Every remaining query would fail the same way. Nothing found
+                # yet means the whole run failed, so let the caller say why.
+                if not companies:
+                    raise
+                logger.warning(
+                    "SearchSource: %s Stopping with %d result(s) so far.", exc, len(companies)
+                )
+                break
             except Exception as exc:
                 logger.warning(
                     "SearchSource: provider=%s failed for query=%r (%s)",
@@ -180,6 +194,16 @@ class _SiteScopedSearchSource(BaseSource):
                 break
             try:
                 results = await self._provider.search(query, limit=per_query_limit)
+            except SearchQuotaExceededError as exc:
+                if not companies:
+                    raise
+                logger.warning(
+                    "%s: %s Stopping with %d result(s) so far.",
+                    type(self).__name__,
+                    exc,
+                    len(companies),
+                )
+                break
             except Exception as exc:
                 logger.warning(
                     "%s: provider=%s failed for query=%r (%s)",

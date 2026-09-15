@@ -101,3 +101,62 @@ async def validate_email_domain(email: str, *, timeout: float = 3.0) -> bool | N
             return None
 
     return await asyncio.to_thread(_lookup)
+
+
+# Structural check for a single address typed in by a user — stricter than
+# EMAIL_RE, which is tuned for finding addresses inside page text.
+_ADDRESS_RE = re.compile(
+    r"^[A-Za-z0-9._%+\-]+@(?:[A-Za-z0-9](?:[A-Za-z0-9\-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}$"
+)
+
+
+def is_valid_email_syntax(email: str) -> bool:
+    """True if `email` is a structurally plausible address (practical, not full RFC 5322)."""
+    if len(email) > 254 or ".." in email or email.count("@") != 1:
+        return False
+    local = email.split("@", 1)[0]
+    if len(local) > 64 or local.startswith(".") or local.endswith("."):
+        return False
+    return bool(_ADDRESS_RE.match(email))
+
+
+async def verify_email(email: str) -> dict:
+    """Verify one address: syntax first, then an MX check on its domain.
+
+    Status is `valid` (well-formed and the domain accepts mail),
+    `invalid_format`, `no_mail_server` (the domain has no MX records) or
+    `unknown` (the DNS check couldn't complete). Like everything in this
+    module it never contacts the mailbox — `valid` means the domain can
+    receive mail, not that this particular mailbox exists.
+    """
+    email = email.strip()
+    if not is_valid_email_syntax(email):
+        return {
+            "email": email,
+            "status": "invalid_format",
+            "syntax_valid": False,
+            "domain_accepts_mail": None,
+        }
+
+    accepts_mail = await validate_email_domain(email)
+    if accepts_mail is None:
+        status = "unknown"
+    else:
+        status = "valid" if accepts_mail else "no_mail_server"
+    return {
+        "email": email,
+        "status": status,
+        "syntax_valid": True,
+        "domain_accepts_mail": accepts_mail,
+    }
+
+
+async def verify_emails(emails: list[str]) -> list[dict]:
+    """Verify several addresses concurrently, in input order — blank entries
+    and case-insensitive duplicates are dropped (the first spelling wins)."""
+    unique: dict[str, str] = {}
+    for raw in emails:
+        email = raw.strip()
+        if email and email.lower() not in unique:
+            unique[email.lower()] = email
+    return list(await asyncio.gather(*(verify_email(email) for email in unique.values())))

@@ -70,6 +70,39 @@ class TestParseProfileSnippet:
         assert parsed.title == "Senior Trading Manager"
         assert parsed.company_name == "Falcon Petroleum Trading"
 
+    def test_truncated_title_company_is_not_reported(self):
+        parsed = parse_profile_snippet(
+            "Michael Jones - Senior Trading Manager at Falcon Petrol..."
+        )
+        assert parsed.name == "Michael Jones"
+        assert parsed.company_name is None
+
+    def test_labeled_experience_in_snippet_supplies_the_company(self):
+        parsed = parse_profile_snippet(
+            "Pat Patterson - Underground Experience Oil and Gas Industry",
+            "Underground Experience Oil and Gas Industry · Experience: Northern "
+            "Pipeline Construction · Location: Wood Dale · 25 connections on LinkedIn.",
+        )
+        assert parsed.name == "Pat Patterson"
+        assert parsed.company_name == "Northern Pipeline Construction"
+
+    def test_unlabeled_snippet_text_is_not_guessed_as_a_company(self):
+        # "bp Purdue University" mixes an employer and a school with no
+        # label — too ambiguous, must stay name-only.
+        parsed = parse_profile_snippet(
+            "Jacqueline Anderson - 9 years experience in Oil and Gas industry",
+            "Jacqueline Anderson. 9 years experience in Oil and Gas industry. bp "
+            "Purdue University. Munster, Indiana, United ...",
+        )
+        assert parsed.company_name is None
+
+    def test_title_company_takes_precedence_over_snippet(self):
+        parsed = parse_profile_snippet(
+            "Michael Jones - Senior Trading Manager at Falcon Petroleum Trading | LinkedIn",
+            "Experience: Some Other Co · Location: Dubai",
+        )
+        assert parsed.company_name == "Falcon Petroleum Trading"
+
     def test_blank_title_returns_none(self):
         assert parse_profile_snippet("   ") is None
         assert parse_profile_snippet("| LinkedIn") is None

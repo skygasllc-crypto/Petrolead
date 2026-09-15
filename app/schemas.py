@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 ALLOWED_LIMITS = {10, 25, 50, 100}
 MAX_BULK_LOOKUP_ITEMS = 25
+MAX_VERIFY_EMAILS = 50
 
 
 class DiscoverUrlRequestSchema(BaseModel):
@@ -401,6 +403,27 @@ class SavedSearchSchema(BaseModel):
     created_at: datetime
     last_run_at: datetime | None
     next_run_at: datetime | None
+
+
+class VerifyEmailsRequestSchema(BaseModel):
+    """Body for POST /api/emails/verify — the Email Verifier."""
+
+    emails: list[str] = Field(min_length=1, max_length=MAX_VERIFY_EMAILS)
+
+
+class VerifiedEmailSchema(BaseModel):
+    email: str
+    status: Literal["valid", "invalid_format", "no_mail_server", "unknown"]
+    syntax_valid: bool
+    # None when the format was invalid (no lookup ran) or the DNS check failed.
+    domain_accepts_mail: bool | None
+
+
+class VerifyEmailsResponseSchema(BaseModel):
+    results: list[VerifiedEmailSchema]
+    valid_count: int
+    invalid_count: int
+    unknown_count: int
 
 
 class ErrorResponseSchema(BaseModel):
