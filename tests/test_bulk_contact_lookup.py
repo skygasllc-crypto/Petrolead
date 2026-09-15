@@ -96,10 +96,10 @@ class TestBulkContactLookupUrls:
         # that one item.
         original_find_match = company_service.find_match
 
-        def flaky_find_match(db, candidate):
+        def flaky_find_match(db, candidate, owner_id):
             if candidate.company_name == "Boom Petroleum":
                 raise RuntimeError("simulated unexpected failure")
-            return original_find_match(db, candidate)
+            return original_find_match(db, candidate, owner_id)
 
         monkeypatch.setattr(company_service, "find_match", flaky_find_match)
 

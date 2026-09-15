@@ -1,9 +1,9 @@
-"""A dedicated view over every extracted business email, across all companies.
+"""A dedicated view over every extracted business email across one account's companies.
 
 `Company.emails` already exists per-company on the Company Profile page;
-this module is the flat, cross-company "folder" of every `CompanyEmail`
-row — filterable and exportable on its own, independent of which company
-each one belongs to.
+this module is the flat, cross-company "folder" of an account's
+`CompanyEmail` rows — filterable and exportable on its own, independent of
+which company each one belongs to.
 """
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ def _row_to_dict(email: CompanyEmail) -> dict:
 
 def _filtered_emails_stmt(
     *,
+    owner_id: str,
     search: str | None = None,
     is_valid: bool | None = None,
     country: str | None = None,
@@ -41,6 +42,7 @@ def _filtered_emails_stmt(
         select(CompanyEmail)
         .join(Company, CompanyEmail.company_id == Company.id)
         .options(contains_eager(CompanyEmail.company))
+        .where(Company.owner_id == owner_id)
     )
     if search:
         like = f"%{search.strip().lower()}%"
@@ -63,6 +65,7 @@ def _filtered_emails_stmt(
 def list_emails(
     db: Session,
     *,
+    owner_id: str,
     search: str | None = None,
     is_valid: bool | None = None,
     country: str | None = None,
@@ -72,6 +75,7 @@ def list_emails(
     page_size: int = 25,
 ) -> tuple[list[dict], int]:
     stmt = _filtered_emails_stmt(
+        owner_id=owner_id,
         search=search,
         is_valid=is_valid,
         country=country,
@@ -92,6 +96,7 @@ def list_emails(
 def export_emails(
     db: Session,
     *,
+    owner_id: str,
     search: str | None = None,
     is_valid: bool | None = None,
     country: str | None = None,
@@ -100,6 +105,7 @@ def export_emails(
     mark_exported: bool = True,
 ) -> list[dict]:
     stmt = _filtered_emails_stmt(
+        owner_id=owner_id,
         search=search,
         is_valid=is_valid,
         country=country,

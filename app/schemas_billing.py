@@ -30,6 +30,8 @@ class BillingSummarySchema(BaseModel):
     max_results_per_search: int | None
     bulk_lookup: bool
     export: bool
+    # How many scheduled searches the plan allows; None means unlimited.
+    scheduled_searches: int | None
 
 
 class AssignPlanRequestSchema(BaseModel):

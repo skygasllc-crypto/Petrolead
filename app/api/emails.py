@@ -34,10 +34,12 @@ def get_emails(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=25, ge=1, le=200),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> PaginatedEmailsSchema:
     try:
         items, total = email_service.list_emails(
             db,
+            owner_id=current_user.id,
             search=search,
             is_valid=is_valid,
             country=country,
@@ -94,6 +96,7 @@ def export_emails(
     try:
         emails = email_service.export_emails(
             db,
+            owner_id=current_user.id,
             search=search,
             is_valid=is_valid,
             country=country,

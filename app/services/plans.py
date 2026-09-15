@@ -19,6 +19,8 @@ class Plan:
     max_results_per_search: int
     bulk_lookup: bool
     export: bool
+    # How many scheduled searches an account may keep; None means unlimited.
+    scheduled_searches: int | None
 
 
 PLANS: dict[str, Plan] = {
@@ -30,6 +32,7 @@ PLANS: dict[str, Plan] = {
         max_results_per_search=10,
         bulk_lookup=False,
         export=False,
+        scheduled_searches=0,
     ),
     "professional": Plan(
         id="professional",
@@ -39,6 +42,7 @@ PLANS: dict[str, Plan] = {
         max_results_per_search=50,
         bulk_lookup=True,
         export=True,
+        scheduled_searches=5,
     ),
     "enterprise": Plan(
         id="enterprise",
@@ -48,5 +52,6 @@ PLANS: dict[str, Plan] = {
         max_results_per_search=100,
         bulk_lookup=True,
         export=True,
+        scheduled_searches=None,
     ),
 }

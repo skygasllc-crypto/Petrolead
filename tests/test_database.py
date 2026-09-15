@@ -1,3 +1,5 @@
+import pytest
+
 from app.database.models import (
     Company,
     CompanyContact,
@@ -5,15 +7,32 @@ from app.database.models import (
     SearchQuery,
     SearchStatus,
     SocialProfile,
+    User,
 )
 from app.discovery.normalizer import normalize_company_name
 
 
+@pytest.fixture()
+def owner(db_session) -> User:
+    user = User(email="owner@example.com", hashed_password="not-a-real-hash")
+    db_session.add(user)
+    db_session.commit()
+    return user
+
+
+def _company(owner: User, **fields) -> Company:
+    return Company(
+        owner_id=owner.id,
+        company_name="Falcon Oil Trading LLC",
+        normalized_name=normalize_company_name("Falcon Oil Trading LLC"),
+        **fields,
+    )
+
+
 class TestCompanyModel:
-    def test_create_and_read_company(self, db_session):
-        company = Company(
-            company_name="Falcon Oil Trading LLC",
-            normalized_name=normalize_company_name("Falcon Oil Trading LLC"),
+    def test_create_and_read_company(self, db_session, owner):
+        company = _company(
+            owner,
             country="United Arab Emirates",
             city="Dubai",
             region="Middle East",
@@ -35,16 +54,13 @@ class TestCompanyModel:
         assert company.id is not None
         fetched = db_session.get(Company, company.id)
         assert fetched is not None
+        assert fetched.owner_id == owner.id
         assert fetched.company_name == "Falcon Oil Trading LLC"
         assert fetched.products == ["EN590", "Diesel"]
         assert fetched.relevance_score == 75
 
-    def test_company_source_relationship(self, db_session):
-        company = Company(
-            company_name="Falcon Oil Trading LLC",
-            normalized_name=normalize_company_name("Falcon Oil Trading LLC"),
-            relevance_score=50,
-        )
+    def test_company_source_relationship(self, db_session, owner):
+        company = _company(owner, relevance_score=50)
         db_session.add(company)
         db_session.commit()
         db_session.refresh(company)
@@ -63,12 +79,8 @@ class TestCompanyModel:
         assert len(company.sources) == 1
         assert company.sources[0].source == "search:mock"
 
-    def test_company_contact_relationship(self, db_session):
-        company = Company(
-            company_name="Falcon Oil Trading LLC",
-            normalized_name=normalize_company_name("Falcon Oil Trading LLC"),
-            relevance_score=50,
-        )
+    def test_company_contact_relationship(self, db_session, owner):
+        company = _company(owner, relevance_score=50)
         db_session.add(company)
         db_session.commit()
         db_session.refresh(company)
@@ -79,12 +91,8 @@ class TestCompanyModel:
 
         assert company.contact.contact_page_url == "https://falconoil.example/contact"
 
-    def test_social_profile_relationship(self, db_session):
-        company = Company(
-            company_name="Falcon Oil Trading LLC",
-            normalized_name=normalize_company_name("Falcon Oil Trading LLC"),
-            relevance_score=50,
-        )
+    def test_social_profile_relationship(self, db_session, owner):
+        company = _company(owner, relevance_score=50)
         db_session.add(company)
         db_session.commit()
         db_session.refresh(company)
@@ -100,8 +108,9 @@ class TestCompanyModel:
 
 
 class TestSearchQueryModel:
-    def test_create_search_query(self, db_session):
+    def test_create_search_query(self, db_session, owner):
         search = SearchQuery(
+            owner_id=owner.id,
             region="Middle East",
             country="United Arab Emirates",
             industry="Petroleum Trading",

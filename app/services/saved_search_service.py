@@ -1,9 +1,10 @@
 """Saved / scheduled searches (Phase 10).
 
 Manages `SavedSearch` rows (CRUD) and running whichever ones are due.
-The API layer only ever schedules; actual execution happens either via
-`app.worker`'s Celery beat task (production) or by calling
-`run_due_saved_searches` directly (tests, or a manual trigger).
+Every saved search belongs to one account, and its runs save companies
+into that account's list. The API layer only ever schedules; actual
+execution happens either via `app.worker`'s Celery beat task (production)
+or by calling `run_due_saved_searches` directly (tests, or a manual trigger).
 """
 
 from __future__ import annotations
@@ -11,11 +12,12 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.database.models import SavedSearch, utcnow
+from app.database.models import SavedSearch, User, utcnow
 from app.schemas import DiscoverRequestSchema, SavedSearchCreateSchema
+from app.services import billing_service
 from app.services.company_service import run_discovery
 
 logger = logging.getLogger("petrolead.services.saved_search")
@@ -26,8 +28,11 @@ FREQUENCY_DELTAS: dict[str, timedelta] = {
 }
 
 
-def create_saved_search(db: Session, payload: SavedSearchCreateSchema) -> SavedSearch:
+def create_saved_search(
+    db: Session, payload: SavedSearchCreateSchema, owner_id: str
+) -> SavedSearch:
     saved = SavedSearch(
+        owner_id=owner_id,
         name=payload.name,
         region=payload.region,
         country=payload.country,
@@ -48,17 +53,29 @@ def create_saved_search(db: Session, payload: SavedSearchCreateSchema) -> SavedS
     return saved
 
 
-def list_saved_searches(db: Session) -> list[SavedSearch]:
-    stmt = select(SavedSearch).order_by(SavedSearch.created_at.desc())
+def count_saved_searches(db: Session, owner_id: str) -> int:
+    return db.execute(
+        select(func.count()).select_from(SavedSearch).where(SavedSearch.owner_id == owner_id)
+    ).scalar_one()
+
+
+def list_saved_searches(db: Session, owner_id: str) -> list[SavedSearch]:
+    stmt = (
+        select(SavedSearch)
+        .where(SavedSearch.owner_id == owner_id)
+        .order_by(SavedSearch.created_at.desc())
+    )
     return list(db.execute(stmt).scalars().all())
 
 
-def get_saved_search(db: Session, saved_search_id: str) -> SavedSearch | None:
-    return db.get(SavedSearch, saved_search_id)
-
-
-def delete_saved_search(db: Session, saved_search_id: str) -> bool:
+def get_saved_search(db: Session, saved_search_id: str, owner_id: str) -> SavedSearch | None:
+    """One of `owner_id`'s saved searches — another account's is treated as not found."""
     saved = db.get(SavedSearch, saved_search_id)
+    return saved if saved is not None and saved.owner_id == owner_id else None
+
+
+def delete_saved_search(db: Session, saved_search_id: str, owner_id: str) -> bool:
+    saved = get_saved_search(db, saved_search_id, owner_id)
     if saved is None:
         return False
     db.delete(saved)
@@ -67,9 +84,9 @@ def delete_saved_search(db: Session, saved_search_id: str) -> bool:
 
 
 def set_saved_search_active(
-    db: Session, saved_search_id: str, is_active: bool
+    db: Session, saved_search_id: str, is_active: bool, owner_id: str
 ) -> SavedSearch | None:
-    saved = db.get(SavedSearch, saved_search_id)
+    saved = get_saved_search(db, saved_search_id, owner_id)
     if saved is None:
         return None
     saved.is_active = is_active
@@ -78,11 +95,13 @@ def set_saved_search_active(
     return saved
 
 
-def due_saved_searches(db: Session) -> list[SavedSearch]:
-    now = utcnow()
+def due_saved_searches(db: Session, owner_id: str | None = None) -> list[SavedSearch]:
+    """Active saved searches whose next run is due — every account's, or one account's."""
     stmt = select(SavedSearch).where(
-        SavedSearch.is_active.is_(True), SavedSearch.next_run_at <= now
+        SavedSearch.is_active.is_(True), SavedSearch.next_run_at <= utcnow()
     )
+    if owner_id is not None:
+        stmt = stmt.where(SavedSearch.owner_id == owner_id)
     return list(db.execute(stmt).scalars().all())
 
 
@@ -97,7 +116,7 @@ async def run_saved_search(db: Session, saved: SavedSearch) -> None:
         keywords=saved.keywords,
         limit=saved.result_limit,
     )
-    search_query = await run_discovery(db, payload)
+    search_query = await run_discovery(db, payload, saved.owner_id)
     search_query.saved_search_id = saved.id
     saved.last_run_at = utcnow()
     saved.next_run_at = saved.last_run_at + FREQUENCY_DELTAS.get(
@@ -113,12 +132,25 @@ async def run_saved_search(db: Session, saved: SavedSearch) -> None:
     )
 
 
-async def run_due_saved_searches(db: Session) -> int:
-    """Run every saved search whose schedule is currently due. Returns the count run."""
-    due = due_saved_searches(db)
-    for saved in due:
+async def run_due_saved_searches(db: Session, owner_id: str | None = None) -> int:
+    """Run every due saved search (or just `owner_id`'s). Returns the count run.
+
+    A search is skipped — and stays due — while its owner is blocked or no
+    longer has a plan that includes scheduled searches, so a lapsed plan
+    doesn't keep spending search-provider calls."""
+    ran = 0
+    for saved in due_saved_searches(db, owner_id):
+        owner = db.get(User, saved.owner_id)
+        if owner is None or not owner.is_active:
+            continue
+        if not billing_service.allows_scheduled_searches(db, owner):
+            logger.info(
+                "Skipping scheduled search %s: its owner's plan doesn't include them", saved.id
+            )
+            continue
         try:
             await run_saved_search(db, saved)
+            ran += 1
         except Exception:
             logger.exception("Scheduled search %s (%r) failed", saved.id, saved.name)
-    return len(due)
+    return ran

@@ -53,10 +53,12 @@ def get_companies(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=25, ge=1, le=200),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> PaginatedCompaniesSchema:
     try:
         items, total = company_service.list_companies(
             db,
+            owner_id=current_user.id,
             country=country,
             region=region,
             industry=industry,
@@ -104,6 +106,7 @@ def export_companies(
     try:
         companies = company_service.export_companies(
             db,
+            owner_id=current_user.id,
             country=country,
             region=region,
             industry=industry,
@@ -141,8 +144,12 @@ def export_companies(
 
 
 @router.get("/companies/{company_id}", response_model=CompanyDetailSchema)
-def get_company(company_id: str, db: Session = Depends(get_db)) -> CompanyDetailSchema:
-    company = company_service.get_company(db, company_id)
+def get_company(
+    company_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> CompanyDetailSchema:
+    company = company_service.get_company(db, company_id, current_user.id)
     if company is None:
         raise HTTPException(status_code=404, detail="Company not found.")
     return company
@@ -162,7 +169,9 @@ async def discover_companies(
     settings = get_settings()
     billing_service.check_discovery(db, current_user, payload.limit)
     try:
-        search_query, previews = await company_service.discover_preview(db, payload)
+        search_query, previews = await company_service.discover_preview(
+            db, payload, current_user.id
+        )
     except Exception as exc:
         logger.exception("Discovery job crashed unexpectedly")
         raise HTTPException(
@@ -211,7 +220,7 @@ async def discover_company_from_url(
         billing_service.require_plan(db, current_user)
 
     try:
-        preview = await company_service.discover_from_url_preview(db, url)
+        preview = await company_service.discover_from_url_preview(db, url, current_user.id)
     except company_service.UrlLookupError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
@@ -246,7 +255,9 @@ async def bulk_contact_lookup(
         billing_service.require_feature(db, current_user, "bulk_lookup", "Bulk lookup")
     billing_service.require_credits(db, current_user, needed=len(payload.items))
 
-    results = await company_service.bulk_contact_lookup_preview(db, payload.items)
+    results = await company_service.bulk_contact_lookup_preview(
+        db, payload.items, current_user.id
+    )
     succeeded = sum(1 for r in results if r["success"])
     emails_found = sum(1 for r in results if r["success"] and r["preview"]["emails"])
     billing_service.spend_credits(
@@ -274,13 +285,15 @@ async def bulk_contact_lookup(
 
 @router.post("/companies/save", response_model=CompanyDetailSchema)
 def save_company(
-    payload: SaveCompanyRequestSchema, db: Session = Depends(get_db)
+    payload: SaveCompanyRequestSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> CompanyDetailSchema:
     """Save one previewed company (from `/discover` or `/discover-url`) to
     your Companies list. Safe to call on a company that's already saved —
     it merges into the existing record instead of duplicating it."""
     try:
-        return company_service.save_candidate(db, payload)
+        return company_service.save_candidate(db, payload, current_user.id)
     except company_service.CompanySaveError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
@@ -292,12 +305,14 @@ def save_company(
 
 @router.post("/companies/save-bulk", response_model=SaveCompaniesBulkResponseSchema)
 def save_companies_bulk(
-    payload: SaveCompaniesBulkRequestSchema, db: Session = Depends(get_db)
+    payload: SaveCompaniesBulkRequestSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> SaveCompaniesBulkResponseSchema:
     """Save several previewed companies at once ("Save All" on a results page)."""
     try:
         results, new_count, duplicate_count = company_service.save_candidates_bulk(
-            db, payload.companies
+            db, payload.companies, current_user.id
         )
     except Exception as exc:
         logger.exception("Bulk save crashed unexpectedly")
@@ -314,9 +329,12 @@ def get_searches(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=25, ge=1, le=200),
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
     try:
-        items, total = company_service.list_searches(db, page=page, page_size=page_size)
+        items, total = company_service.list_searches(
+            db, owner_id=current_user.id, page=page, page_size=page_size
+        )
     except Exception as exc:
         logger.exception("Failed to list searches")
         raise HTTPException(

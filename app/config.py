@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     # Defaults to a local SQLite file so the app is runnable with zero
     # external setup. Point DATABASE_URL at Postgres for staging/production.
     database_url: str = "sqlite:///./petrolead.db"
+    # Apply pending Alembic migrations when the app starts. Turn off when
+    # several app processes share one database, and run
+    # `alembic upgrade head` once per deploy instead.
+    run_migrations_on_startup: bool = True
 
     # --- CORS ---
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"

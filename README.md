@@ -192,9 +192,16 @@ Then set in `.env`:
 DATABASE_URL=postgresql+psycopg://petrolead:petrolead@localhost:5432/petrolead
 ```
 
-Tables are created automatically on startup for convenience (`init_db()` in
-`app/database/connection.py`). Production deployments should switch to
-Alembic migrations before making further schema changes.
+**Schema migrations.** The schema is managed with Alembic
+(`alembic/versions/`). The app applies any pending migrations when it starts
+(`RUN_MIGRATIONS_ON_STARTUP=true`, the default). A database created by an
+earlier version of PetroLead — before migrations existed — is adopted
+automatically: its tables and data are kept and only the newer changes are
+applied. When several app processes share one database (or in production),
+set `RUN_MIGRATIONS_ON_STARTUP=false` and run `alembic upgrade head` once per
+deploy instead. After changing a model, draft the next migration with
+`alembic revision --autogenerate -m "describe the change"` and review it
+before committing.
 
 ### 3. Environment Variables
 
@@ -203,6 +210,7 @@ Copy `.env.example` to `.env` and fill in real values. **Never commit `.env`.**
 | Variable | Purpose |
 |---|---|
 | `DATABASE_URL` | SQLAlchemy connection string. Defaults to local SQLite. |
+| `RUN_MIGRATIONS_ON_STARTUP` | Default `true`: apply pending database migrations when the app starts. Set `false` when several app processes share a database, and run `alembic upgrade head` per deploy. |
 | `CORS_ORIGINS` | Comma-separated list of allowed frontend origins. |
 | `SECRET_KEY` | Signs login session tokens. **The shipped default is insecure and dev-only** — generate a real one: `python -c "import secrets; print(secrets.token_hex(32))"`. |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Login session lifetime. Default 10080 (1 week). |
@@ -350,10 +358,10 @@ never to the client.
 
 **Authentication.** Every endpoint except `/api/health` and `/api/auth/*`
 requires `Authorization: Bearer <token>` (obtained from `/register` or
-`/login`); a missing/invalid/expired token gets a `401`. Accounts gate
-*access* to the app — the underlying company/search/email data is a single
-shared workspace, not partitioned per user (see `app/database/models.py`'s
-`User` docstring). Sessions are stateless JWTs
+`/login`); a missing/invalid/expired token gets a `401`. Each account's
+saved companies, emails, search history and scheduled searches are private to
+it — every query is scoped to the signed-in user, and duplicate detection only
+matches against that user's own companies. Sessions are stateless JWTs
 (`ACCESS_TOKEN_EXPIRE_MINUTES`, default 1 week) — there's no server-side
 session store, so a token can't be revoked before it expires.
 
@@ -368,8 +376,9 @@ discovery searches per day and results per search, and bulk lookup and
 CSV/Excel export need Professional or Enterprise. Credits are granted per
 monthly period and roll over — renewal happens the next time the account is
 used. Every change is recorded in the `credit_transactions` table. Admins
-are never limited. Saved searches and exports aren't limited per user,
-because saved data is still one shared workspace.
+are never limited. Scheduled searches are limited per plan too (none on
+Basic, 5 on Professional, unlimited on Enterprise), and stop running while
+their owner's plan doesn't include them.
 
 ---
 

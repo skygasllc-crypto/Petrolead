@@ -6,6 +6,7 @@ turn it back on by patching `billing_service.get_settings` (and
 the real settings — JWT signing stays consistent with the rest of the app.
 """
 
+import asyncio
 from datetime import timedelta
 
 import pytest
@@ -17,7 +18,7 @@ from app.config import get_settings as real_get_settings
 from app.database.models import CreditTransaction, Subscription, utcnow
 from app.discovery import emails as emails_module
 from app.discovery import extractor as extractor_module
-from app.services import billing_service, company_service
+from app.services import billing_service, company_service, saved_search_service
 from tests.test_url_lookup import _fake_fetch_page, _FakeRealProvider
 
 PASSWORD = "correct-horse-battery"
@@ -362,3 +363,46 @@ class TestMonthlyRenewal:
             select(CreditTransaction).where(CreditTransaction.reason == "monthly_renewal")
         ).scalars().all()
         assert len(renewals) == 3
+
+
+class TestScheduledSearchLimits:
+    @staticmethod
+    def _schedule(api, headers, name="UAE diesel"):
+        return api.post(
+            "/api/saved-searches",
+            json={"name": name, "country": "United Arab Emirates", "limit": 10},
+            headers=headers,
+        )
+
+    def test_basic_has_no_scheduled_searches(self, api, admin, member):
+        _assign(api, admin, member[0], "basic", 1000)
+        response = self._schedule(api, member[1])
+        assert response.status_code == 403
+        assert "aren't included in the Basic plan" in response.json()["detail"]
+        assert _billing(api, member[1])["scheduled_searches"] == 0
+
+    def test_professional_allows_five(self, api, admin, member):
+        _assign(api, admin, member[0], "professional", 2000)
+        assert _billing(api, member[1])["scheduled_searches"] == 5
+        for i in range(5):
+            assert self._schedule(api, member[1], name=f"Search {i}").status_code == 200
+
+        sixth = self._schedule(api, member[1], name="One too many")
+        assert sixth.status_code == 403
+        assert "up to 5 scheduled searches" in sixth.json()["detail"]
+
+    def test_enterprise_is_unlimited(self, api, admin, member):
+        _assign(api, admin, member[0], "enterprise", 50000)
+        assert _billing(api, member[1])["scheduled_searches"] is None
+        for i in range(6):
+            assert self._schedule(api, member[1], name=f"Search {i}").status_code == 200
+
+    def test_scheduled_searches_stop_running_when_the_plan_is_removed(
+        self, api, admin, member, db_session
+    ):
+        _assign(api, admin, member[0], "professional", 2000)
+        assert self._schedule(api, member[1]).status_code == 200
+        api.delete(f"/api/admin/users/{member[0]}/subscription", headers=admin)
+
+        ran = asyncio.run(saved_search_service.run_due_saved_searches(db_session))
+        assert ran == 0

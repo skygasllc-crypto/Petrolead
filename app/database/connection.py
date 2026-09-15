@@ -39,13 +39,3 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
-
-
-def init_db() -> None:
-    """Create all tables. Used for local/dev bootstrapping and tests.
-
-    Production deployments should use Alembic migrations instead.
-    """
-    from app.database import models  # noqa: F401  (ensure models are registered)
-
-    Base.metadata.create_all(bind=engine)

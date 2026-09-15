@@ -38,9 +38,9 @@ class SearchStatus(str, enum.Enum):
 class User(Base):
     """An account with access to the app.
 
-    Accounts gate access to PetroLead; they don't partition the
-    company/search data itself, which stays a single shared workspace
-    (like a small team's shared tool) rather than per-user siloed data.
+    Each account's saved companies, search history and scheduled searches
+    are private to it — see the `owner_id` columns on `Company`,
+    `SearchQuery` and `SavedSearch`.
     """
 
     __tablename__ = "users"
@@ -69,9 +69,7 @@ class User(Base):
 class Subscription(Base):
     """A user's plan, email-credit balance and daily usage counter.
 
-    Kept in its own table rather than as columns on `users`, so an existing
-    database picks it up through `init_db()`'s create_all() without a
-    migration. Credits are granted per monthly period and roll over;
+    Credits are granted per monthly period and roll over;
     renewal happens lazily the next time the account is used — see
     `app.services.billing_service`. Plan limits live in `app.services.plans`.
     """
@@ -122,6 +120,12 @@ class Company(Base):
     __tablename__ = "companies"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+
+    # The account this company belongs to. Each account's companies are
+    # private to it, including for duplicate detection.
+    owner_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", name="fk_companies_owner_id_users"), index=True, nullable=False
+    )
 
     # --- Identity ---
     company_name: Mapped[str] = mapped_column(String(500), nullable=False)
@@ -350,6 +354,13 @@ class SearchQuery(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
 
+    # The account that ran this search.
+    owner_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", name="fk_search_queries_owner_id_users"),
+        index=True,
+        nullable=False,
+    )
+
     region: Mapped[str | None] = mapped_column(String(100))
     country: Mapped[str | None] = mapped_column(String(150))
     city: Mapped[str | None] = mapped_column(String(150))
@@ -392,6 +403,13 @@ class SavedSearch(Base):
     __tablename__ = "saved_searches"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+
+    # The account this schedule belongs to; its runs save companies for that account.
+    owner_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", name="fk_saved_searches_owner_id_users"),
+        index=True,
+        nullable=False,
+    )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
 
     region: Mapped[str | None] = mapped_column(String(100))

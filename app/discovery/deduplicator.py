@@ -58,20 +58,25 @@ def _locations_compatible(a_country: str | None, a_city: str | None, company: Co
     return True
 
 
-def find_match(db: Session, candidate: DiscoveredCompany) -> MatchResult:
-    """Find the best existing `Company` match for a discovered candidate, if any."""
+def find_match(db: Session, candidate: DiscoveredCompany, owner_id: str) -> MatchResult:
+    """Find the best match for a discovered candidate among one account's
+    saved companies, if any.
+
+    Scoped to `owner_id`: every account's companies are private to it, so
+    two customers saving the same company each get their own record."""
     domain = extract_domain(candidate.website)
     normalized = normalize_company_name(candidate.company_name)
+    owned = db.query(Company).filter(Company.owner_id == owner_id)
 
     if domain:
-        existing = db.query(Company).filter(Company.domain == domain).first()
+        existing = owned.filter(Company.domain == domain).first()
         if existing:
             return MatchResult(company=existing, confidence=DOMAIN_MATCH_CONFIDENCE)
 
     if not normalized:
         return MatchResult(company=None, confidence=0.0)
 
-    exact_matches = db.query(Company).filter(Company.normalized_name == normalized).all()
+    exact_matches = owned.filter(Company.normalized_name == normalized).all()
     compatible_exact = [
         c for c in exact_matches if _locations_compatible(candidate.country, candidate.city, c)
     ]
@@ -84,9 +89,7 @@ def find_match(db: Session, candidate: DiscoveredCompany) -> MatchResult:
     best_company: Company | None = None
     best_similarity = 0.0
     country_scope = (
-        db.query(Company).filter(Company.country == candidate.country).all()
-        if candidate.country
-        else []
+        owned.filter(Company.country == candidate.country).all() if candidate.country else []
     )
     for company in country_scope:
         similarity = SequenceMatcher(None, normalized, company.normalized_name).ratio()

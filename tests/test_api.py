@@ -233,10 +233,10 @@ class TestSaveEndpoints:
 
         original_find_match = company_service.find_match
 
-        def flaky_find_match(db, candidate):
+        def flaky_find_match(db, candidate, owner_id):
             if candidate.company_name == boom_name:
                 raise RuntimeError("simulated persistence failure")
-            return original_find_match(db, candidate)
+            return original_find_match(db, candidate, owner_id)
 
         monkeypatch.setattr(company_service, "find_match", flaky_find_match)
 

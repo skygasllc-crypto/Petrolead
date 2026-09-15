@@ -101,6 +101,13 @@ function PlanDetails({ billing }) {
             <Included ok>Up to {billing.max_results_per_search} results per company search</Included>
             <Included ok={billing.bulk_lookup}>Bulk lookup (up to 25 people at once)</Included>
             <Included ok={billing.export}>CSV &amp; Excel export</Included>
+            <Included ok={billing.scheduled_searches !== 0}>
+              {billing.scheduled_searches === null
+                ? "Unlimited scheduled searches"
+                : billing.scheduled_searches
+                  ? `Up to ${billing.scheduled_searches} scheduled searches`
+                  : "Scheduled searches"}
+            </Included>
           </ul>
         </Card>
 

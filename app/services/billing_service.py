@@ -185,6 +185,38 @@ def check_discovery(db: Session, user: User, requested_results: int) -> None:
         )
 
 
+def check_saved_search_quota(db: Session, user: User, existing: int) -> None:
+    """Raise if the user can't create another scheduled search on their plan."""
+    active = require_plan(db, user)
+    if active is None:
+        return
+    plan = active[1]
+    if plan.scheduled_searches is None:
+        return
+    if plan.scheduled_searches == 0:
+        raise BillingError(
+            f"Scheduled searches aren't included in the {plan.name} plan. Upgrade to "
+            "Professional or Enterprise to use them.",
+            403,
+        )
+    if existing >= plan.scheduled_searches:
+        raise BillingError(
+            f"The {plan.name} plan includes up to {plan.scheduled_searches} scheduled searches, "
+            "and you've used them all. Delete one first, or upgrade to Enterprise for unlimited "
+            "scheduled searches.",
+            403,
+        )
+
+
+def allows_scheduled_searches(db: Session, user: User) -> bool:
+    """Whether scheduled searches owned by `user` may run right now."""
+    if is_exempt(user):
+        return True
+    subscription = get_subscription(db, user)
+    plan = PLANS.get(subscription.plan) if subscription else None
+    return plan is not None and plan.scheduled_searches != 0
+
+
 def record_discovery(db: Session, user: User) -> None:
     """Count one completed discovery search against today's allowance."""
     if is_exempt(user):
@@ -309,4 +341,5 @@ def summary(db: Session, user: User) -> dict:
         "max_results_per_search": plan.max_results_per_search if plan else None,
         "bulk_lookup": plan.bulk_lookup if plan else False,
         "export": plan.export if plan else False,
+        "scheduled_searches": plan.scheduled_searches if plan else 0,
     }

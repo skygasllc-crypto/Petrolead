@@ -174,8 +174,9 @@ def _apply_lead_score(company: Company) -> None:
     company.lead_score.verified_phone_component = result.verified_phone_component
 
 
-def _create_company(db: Session, candidate: DiscoveredCompany) -> Company:
+def _create_company(db: Session, candidate: DiscoveredCompany, owner_id: str) -> Company:
     company = Company(
+        owner_id=owner_id,
         company_name=candidate.company_name,
         normalized_name=normalize_company_name(candidate.company_name),
         country=candidate.country,
@@ -252,9 +253,10 @@ def _merge_into_company(
 
 
 def _persist_candidate(
-    db: Session, candidate: DiscoveredCompany, *, context: str
+    db: Session, candidate: DiscoveredCompany, *, owner_id: str, context: str
 ) -> tuple[Company | None, bool]:
-    """Dedup + create-or-merge one candidate. Returns (company, is_new).
+    """Dedup + create-or-merge one candidate into `owner_id`'s companies.
+    Returns (company, is_new).
 
     Returns (None, False) if the candidate was unusable (no name) or
     persistence failed — callers just skip it, same as any other
@@ -268,12 +270,12 @@ def _persist_candidate(
         return None, False
     try:
         with db.begin_nested():
-            match = find_match(db, candidate)
+            match = find_match(db, candidate, owner_id)
             if is_confident_match(match):
                 _merge_into_company(db, match.company, candidate, match.confidence)
                 company, is_new = match.company, False
             else:
-                company, is_new = _create_company(db, candidate), True
+                company, is_new = _create_company(db, candidate, owner_id), True
         return company, is_new
     except Exception:
         logger.exception(
@@ -372,12 +374,12 @@ def _merge_candidates_in_memory(candidates: list[DiscoveredCompany]) -> list[Dis
     return merged
 
 
-def _build_preview(db: Session, candidate: DiscoveredCompany) -> dict:
-    """Score a candidate and check whether it matches an already-saved
-    company, without writing anything — the shape returned to the API for
-    both `/discover` and `/discover-url` previews."""
+def _build_preview(db: Session, candidate: DiscoveredCompany, owner_id: str) -> dict:
+    """Score a candidate and check whether it matches one of `owner_id`'s
+    saved companies, without writing anything — the shape returned to the
+    API for both `/discover` and `/discover-url` previews."""
     relevance_score, lead_score = _score_candidate(candidate)
-    match = find_match(db, candidate)
+    match = find_match(db, candidate, owner_id)
     already_saved = is_confident_match(match)
 
     return {
@@ -469,8 +471,9 @@ async def _execute_sources(
         return None
 
 
-def _new_search_query(payload: DiscoverRequestSchema) -> SearchQuery:
+def _new_search_query(payload: DiscoverRequestSchema, owner_id: str) -> SearchQuery:
     return SearchQuery(
+        owner_id=owner_id,
         region=payload.region,
         country=payload.country,
         city=payload.city,
@@ -484,7 +487,7 @@ def _new_search_query(payload: DiscoverRequestSchema) -> SearchQuery:
 
 
 async def discover_preview(
-    db: Session, payload: DiscoverRequestSchema
+    db: Session, payload: DiscoverRequestSchema, owner_id: str
 ) -> tuple[SearchQuery, list[dict]]:
     """Run a discovery search WITHOUT saving anything (the interactive
     Discover page / paste-a-link flow) — the user reviews results and
@@ -495,7 +498,7 @@ async def discover_preview(
     save outcomes — saving can still change since the database can move
     between preview and save.
     """
-    search_query = _new_search_query(payload)
+    search_query = _new_search_query(payload, owner_id)
     db.add(search_query)
     db.commit()
     db.refresh(search_query)
@@ -507,7 +510,7 @@ async def discover_preview(
     candidates = _merge_candidates_in_memory(candidates)
     logger.info("Search %s: %d candidate(s) previewed, not saved", search_query.id, len(candidates))
 
-    previews = [_build_preview(db, c) for c in candidates if c.company_name.strip()]
+    previews = [_build_preview(db, c, owner_id) for c in candidates if c.company_name.strip()]
     new_count = sum(1 for p in previews if not p["already_saved"])
     duplicate_count = len(previews) - new_count
 
@@ -532,15 +535,16 @@ async def discover_preview(
     return search_query, previews
 
 
-async def run_discovery(db: Session, payload: DiscoverRequestSchema) -> SearchQuery:
-    """Execute a full discovery job AND immediately persist the results.
+async def run_discovery(db: Session, payload: DiscoverRequestSchema, owner_id: str) -> SearchQuery:
+    """Execute a full discovery job AND immediately persist the results
+    into `owner_id`'s companies.
 
     Used only by scheduled/automated searches (Phase 10) — there's no
     user present to review and click Save on an unattended run, so those
     save straight through. Interactive discovery goes through
     `discover_preview` + `save_candidate` instead.
     """
-    search_query = _new_search_query(payload)
+    search_query = _new_search_query(payload, owner_id)
     db.add(search_query)
     db.commit()
     db.refresh(search_query)
@@ -558,7 +562,9 @@ async def run_discovery(db: Session, payload: DiscoverRequestSchema) -> SearchQu
     result_companies: list[Company] = []
 
     for candidate in candidates:
-        company, is_new = _persist_candidate(db, candidate, context=f"Search {search_query.id}")
+        company, is_new = _persist_candidate(
+            db, candidate, owner_id=owner_id, context=f"Search {search_query.id}"
+        )
         if company is None:
             continue
         result_companies.append(company)
@@ -600,7 +606,7 @@ _NOTHING_USABLE_MESSAGE = (
 )
 
 
-async def discover_from_url_preview(db: Session, url: str) -> dict:
+async def discover_from_url_preview(db: Session, url: str, owner_id: str) -> dict:
     """Fetch one pasted URL and preview whatever public contact info is
     there, WITHOUT saving it — same "review then save" flow as
     `discover_preview`.
@@ -616,7 +622,9 @@ async def discover_from_url_preview(db: Session, url: str) -> dict:
     """
     profile_platform = detect_personal_profile_platform(url)
     if profile_platform:
-        return await _preview_from_profile_snippet(db, url, platform=profile_platform)
+        return await _preview_from_profile_snippet(
+            db, url, platform=profile_platform, owner_id=owner_id
+        )
 
     candidates = await WebsiteSource(url).discover(DiscoveryRequest())
     candidate = candidates[0]
@@ -632,7 +640,7 @@ async def discover_from_url_preview(db: Session, url: str) -> dict:
     if not learned_anything:
         raise UrlLookupError(_NOTHING_USABLE_MESSAGE)
 
-    preview = _build_preview(db, candidate)
+    preview = _build_preview(db, candidate, owner_id)
     logger.info("URL lookup %s previewed as %r (not saved)", url, candidate.company_name)
     return preview
 
@@ -701,7 +709,9 @@ def _require_email(
     raise UrlLookupError(f"No business email found for {full_name} — {reason}. Skipped.")
 
 
-async def _preview_from_profile_snippet(db: Session, url: str, *, platform: str) -> dict:
+async def _preview_from_profile_snippet(
+    db: Session, url: str, *, platform: str, owner_id: str
+) -> dict:
     """Fallback for a personal social-profile URL: the page itself is
     login-gated and never fetched. Instead, ask the configured
     `SearchProvider` for whatever public snippet it has indexed for that
@@ -774,7 +784,7 @@ async def _preview_from_profile_snippet(db: Session, url: str, *, platform: str)
         contact_person_title=parsed.title,
         emails=emails,
     )
-    preview = _build_preview(db, candidate)
+    preview = _build_preview(db, candidate, owner_id)
     logger.info(
         "Profile snippet lookup %s previewed contact=%r at company=%r (not saved)",
         url,
@@ -784,7 +794,9 @@ async def _preview_from_profile_snippet(db: Session, url: str, *, platform: str)
     return preview
 
 
-async def _preview_from_name_and_company(db: Session, *, full_name: str, company_name: str) -> dict:
+async def _preview_from_name_and_company(
+    db: Session, *, full_name: str, company_name: str, owner_id: str
+) -> dict:
     """Bulk-lookup path for an item given as a plain name + company (no
     profile URL to derive them from) — goes straight to the same
     domain-resolution + Hunter.io enrichment the profile-snippet fallback
@@ -807,14 +819,14 @@ async def _preview_from_name_and_company(db: Session, *, full_name: str, company
         contact_person_name=full_name,
         emails=emails,
     )
-    preview = _build_preview(db, candidate)
+    preview = _build_preview(db, candidate, owner_id)
     logger.info(
         "Bulk lookup previewed contact=%r at company=%r (not saved)", full_name, company_name
     )
     return preview
 
 
-async def bulk_contact_lookup_preview(db: Session, items: list) -> list[dict]:
+async def bulk_contact_lookup_preview(db: Session, items: list, owner_id: str) -> list[dict]:
     """Look up several people at once — each item is either a LinkedIn
     profile URL (routed through the exact same logic as a single "paste a
     link" lookup) or a plain name + company pair. Items are resolved one
@@ -831,10 +843,13 @@ async def bulk_contact_lookup_preview(db: Session, items: list) -> list[dict]:
     async def _resolve_one(item) -> dict:
         try:
             if item.url is not None:
-                preview = await discover_from_url_preview(db, str(item.url))
+                preview = await discover_from_url_preview(db, str(item.url), owner_id)
             else:
                 preview = await _preview_from_name_and_company(
-                    db, full_name=item.full_name, company_name=item.company_name
+                    db,
+                    full_name=item.full_name,
+                    company_name=item.company_name,
+                    owner_id=owner_id,
                 )
             return {"item": item, "success": True, "error": None, "preview": preview}
         except UrlLookupError as exc:
@@ -877,13 +892,13 @@ def _preview_payload_to_candidate(payload) -> DiscoveredCompany:
     )
 
 
-def save_candidate(db: Session, payload) -> Company:
+def save_candidate(db: Session, payload, owner_id: str) -> Company:
     """Persist one previewed (not-yet-saved) candidate — the explicit
     "Save" action. Goes through the exact same dedup/merge logic as
     automated saves, so saving something that already exists just merges
     into it rather than creating a duplicate."""
     candidate = _preview_payload_to_candidate(payload)
-    company, _ = _persist_candidate(db, candidate, context="manual save")
+    company, _ = _persist_candidate(db, candidate, owner_id=owner_id, context="manual save")
     if company is None:
         raise CompanySaveError("Could not save this company. Please try again.")
     db.commit()
@@ -891,7 +906,9 @@ def save_candidate(db: Session, payload) -> Company:
     return company
 
 
-def save_candidates_bulk(db: Session, payloads: list) -> tuple[list[Company | None], int, int]:
+def save_candidates_bulk(
+    db: Session, payloads: list, owner_id: str
+) -> tuple[list[Company | None], int, int]:
     """Persist several previewed candidates at once ("Save All").
 
     Returns one result per input payload, in the same order — `None`
@@ -907,7 +924,9 @@ def save_candidates_bulk(db: Session, payloads: list) -> tuple[list[Company | No
     results: list[Company | None] = []
     for payload in payloads:
         candidate = _preview_payload_to_candidate(payload)
-        company, is_new = _persist_candidate(db, candidate, context="bulk save")
+        company, is_new = _persist_candidate(
+            db, candidate, owner_id=owner_id, context="bulk save"
+        )
         results.append(company)
         if company is None:
             continue
@@ -924,6 +943,7 @@ def save_candidates_bulk(db: Session, payloads: list) -> tuple[list[Company | No
 
 def _filtered_companies_stmt(
     *,
+    owner_id: str,
     country: str | None = None,
     region: str | None = None,
     industry: str | None = None,
@@ -938,9 +958,10 @@ def _filtered_companies_stmt(
     """Shared WHERE-clause builder for `list_companies` and `export_companies`.
 
     Kept in one place (Phase 9: advanced search & filtering) so pagination
-    and export always agree on what "matches the filters" means.
+    and export always agree on what "matches the filters" means — always
+    within one account's own companies.
     """
-    stmt = select(Company)
+    stmt = select(Company).where(Company.owner_id == owner_id)
     if country:
         stmt = stmt.where(Company.country == country)
     if region:
@@ -977,6 +998,7 @@ def _filtered_companies_stmt(
 def list_companies(
     db: Session,
     *,
+    owner_id: str,
     country: str | None = None,
     region: str | None = None,
     industry: str | None = None,
@@ -991,6 +1013,7 @@ def list_companies(
     page_size: int = 25,
 ) -> tuple[list[Company], int]:
     stmt = _filtered_companies_stmt(
+        owner_id=owner_id,
         country=country,
         region=region,
         industry=industry,
@@ -1022,6 +1045,7 @@ MAX_EXPORT_ROWS = 5000
 def export_companies(
     db: Session,
     *,
+    owner_id: str,
     country: str | None = None,
     region: str | None = None,
     industry: str | None = None,
@@ -1041,6 +1065,7 @@ def export_companies(
     count as an export (none currently do, but keeps the option open).
     """
     stmt = _filtered_companies_stmt(
+        owner_id=owner_id,
         country=country,
         region=region,
         industry=industry,
@@ -1092,14 +1117,16 @@ def to_export_rows(companies: list[Company]) -> list[dict]:
     return rows
 
 
-def get_company(db: Session, company_id: str) -> Company | None:
-    return db.get(Company, company_id)
+def get_company(db: Session, company_id: str, owner_id: str) -> Company | None:
+    """One of `owner_id`'s companies — another account's company is treated as not found."""
+    company = db.get(Company, company_id)
+    return company if company is not None and company.owner_id == owner_id else None
 
 
 def list_searches(
-    db: Session, *, page: int = 1, page_size: int = 25
+    db: Session, *, owner_id: str, page: int = 1, page_size: int = 25
 ) -> tuple[list[SearchQuery], int]:
-    stmt = select(SearchQuery)
+    stmt = select(SearchQuery).where(SearchQuery.owner_id == owner_id)
     total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar_one()
     stmt = (
         stmt.order_by(SearchQuery.created_at.desc())

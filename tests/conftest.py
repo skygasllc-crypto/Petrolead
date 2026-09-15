@@ -25,6 +25,10 @@ os.environ["ADMIN_EMAILS"] = ""
 # Plan and credit limits are off for the suite as a whole — tests aren't
 # about billing unless they turn it on themselves (see tests/test_billing.py).
 os.environ["BILLING_ENFORCED"] = "false"
+# Tests build their schema straight from the models on an in-memory
+# database (the `db_session` fixture below); migrations have their own
+# tests in tests/test_migrations.py.
+os.environ["RUN_MIGRATIONS_ON_STARTUP"] = "false"
 
 import pytest
 from sqlalchemy import create_engine
