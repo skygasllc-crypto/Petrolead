@@ -1,14 +1,16 @@
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import Logo from "./Logo";
 import { useAuth } from "../context/AuthContext";
 
 const NAV_ITEMS = [
-  { to: "/", label: "Dashboard", end: true },
-  { to: "/discover", label: "Discover Companies" },
+  { to: "/dashboard", label: "Dashboard", end: true },
+  { to: "/discover", label: "Company Search" },
+  { to: "/email-finder", label: "Email Finder" },
+  { to: "/verify-emails", label: "Email Verifier" },
   { to: "/companies", label: "Companies" },
   { to: "/emails", label: "Emails" },
-  { to: "/searches", label: "Search History" },
-  { to: "/scheduled", label: "Scheduled Searches" },
+  { to: "/searches", label: "History" },
+  { to: "/scheduled", label: "Scheduled" },
   { to: "/settings", label: "Settings" },
 ];
 
@@ -18,10 +20,10 @@ function NavItem({ to, label, end }) {
       to={to}
       end={end}
       className={({ isActive }) =>
-        `rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+        `whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium transition-colors ${
           isActive
-            ? "bg-base-800 text-brass-400"
-            : "text-ink-500 hover:bg-base-800/60 hover:text-ink-100"
+            ? "bg-brand-50 text-brand-600"
+            : "text-ink-500 hover:bg-base-900 hover:text-ink-100"
         }`
       }
     >
@@ -45,14 +47,11 @@ export default function Layout() {
 
   return (
     <div className="min-h-screen bg-base-900">
-      <header className="sticky top-0 z-30 border-b border-base-700 bg-base-900/95 backdrop-blur">
+      <header className="sticky top-0 z-30 border-b border-base-700 bg-base-850/95 backdrop-blur">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-6 px-4 sm:px-6 lg:px-8">
-          <Logo />
-          <nav className="hidden items-center gap-1 md:flex">
-            {navItems.map((item) => (
-              <NavItem key={item.to} {...item} />
-            ))}
-          </nav>
+          <Link to="/dashboard" aria-label="Dashboard">
+            <Logo />
+          </Link>
           <div className="flex items-center gap-3">
             <span className="hidden max-w-[12rem] truncate text-sm text-ink-500 sm:inline">
               {user?.full_name || user?.email}
@@ -60,13 +59,16 @@ export default function Layout() {
             <button
               type="button"
               onClick={handleLogout}
-              className="rounded-md border border-base-600 px-3 py-1.5 text-xs font-medium text-ink-300 hover:border-status-danger hover:text-status-danger"
+              className="rounded-md border border-base-600 px-3 py-1.5 text-xs font-semibold text-ink-300 hover:border-status-danger hover:text-status-danger"
             >
               Log out
             </button>
           </div>
         </div>
-        <nav className="flex items-center gap-1 overflow-x-auto border-t border-base-800 px-4 py-2 md:hidden">
+        <nav
+          aria-label="App"
+          className="mx-auto flex max-w-7xl items-center gap-1 overflow-x-auto border-t border-base-700 px-4 py-2 sm:px-6 lg:px-8"
+        >
           {navItems.map((item) => (
             <NavItem key={item.to} {...item} />
           ))}
@@ -77,9 +79,11 @@ export default function Layout() {
         <Outlet />
       </main>
 
-      <footer className="mx-auto max-w-7xl px-4 py-8 text-xs text-ink-700 sm:px-6 lg:px-8">
-        PetroLead — petroleum &amp; energy B2B lead intelligence platform. Phase 1: Company
-        Discovery.
+      <footer className="border-t border-base-700 bg-base-850">
+        <p className="mx-auto max-w-7xl px-4 py-6 text-xs text-ink-700 sm:px-6 lg:px-8">
+          © {new Date().getFullYear()} PetroLead — B2B lead intelligence for the petroleum &amp;
+          energy trade.
+        </p>
       </footer>
     </div>
   );

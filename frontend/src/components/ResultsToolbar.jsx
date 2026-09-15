@@ -14,7 +14,7 @@ export default function ResultsToolbar({
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
           placeholder="Search within results..."
-          className="w-full max-w-xs rounded-md border border-base-600 bg-base-800 px-3 py-2 text-sm text-ink-100 placeholder:text-ink-700 focus:border-brass-500 focus:outline-none"
+          className="w-full max-w-xs rounded-md border border-base-600 bg-base-800 px-3 py-2 text-sm text-ink-100 placeholder:text-ink-700 focus:border-brand-500 focus:outline-none"
         />
         <label className="flex items-center gap-2 text-xs text-ink-500">
           Min relevance
@@ -25,7 +25,7 @@ export default function ResultsToolbar({
             step="5"
             value={minRelevance}
             onChange={(e) => onMinRelevanceChange(Number(e.target.value))}
-            className="w-32 accent-[var(--color-brass-500)]"
+            className="w-32 accent-[var(--color-brand-500)]"
           />
           <span className="w-9 tabular-nums text-ink-300">{minRelevance}%</span>
         </label>

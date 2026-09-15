@@ -17,7 +17,7 @@ const INITIAL_FORM = {
 };
 
 const inputClasses =
-  "w-full rounded-md border border-base-600 bg-base-800 px-3 py-2 text-sm text-ink-100 focus:border-brass-500 focus:outline-none";
+  "w-full rounded-md border border-base-600 bg-base-800 px-3 py-2 text-sm text-ink-100 focus:border-brand-500 focus:outline-none";
 
 function Field({ label, children }) {
   return (
@@ -132,7 +132,7 @@ export default function ScheduledSearches() {
             type="button"
             onClick={handleRunDue}
             disabled={runningNow}
-            className="rounded-md border border-base-600 px-4 py-2 text-sm font-medium text-ink-300 hover:border-brass-500 hover:text-brass-400 disabled:opacity-50"
+            className="rounded-md border border-base-600 px-4 py-2 text-sm font-medium text-ink-300 hover:border-brand-500 hover:text-brand-600 disabled:opacity-50"
           >
             {runningNow ? "Running..." : "Run due searches now"}
           </button>
@@ -253,7 +253,7 @@ export default function ScheduledSearches() {
                   onClick={() => toggleProduct(product)}
                   className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
                     active
-                      ? "border-brass-500 bg-brass-500/15 text-brass-300"
+                      ? "border-brand-500 bg-brand-500/15 text-brand-600"
                       : "border-base-600 text-ink-500 hover:border-base-400 hover:text-ink-100"
                   }`}
                 >
@@ -268,7 +268,7 @@ export default function ScheduledSearches() {
           <button
             type="submit"
             disabled={submitting}
-            className="inline-flex w-full items-center justify-center rounded-md bg-brass-500 px-6 py-3 text-sm font-semibold text-base-950 transition-colors hover:bg-brass-400 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+            className="inline-flex w-full items-center justify-center rounded-md bg-brand-500 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
           >
             {submitting ? "Saving..." : "Save Scheduled Search"}
           </button>
@@ -322,7 +322,7 @@ export default function ScheduledSearches() {
                   <button
                     type="button"
                     onClick={() => handleToggle(s.id, !s.is_active)}
-                    className="rounded-md border border-base-600 px-3 py-1.5 text-xs text-ink-300 hover:border-brass-500 hover:text-brass-400"
+                    className="rounded-md border border-base-600 px-3 py-1.5 text-xs text-ink-300 hover:border-brand-500 hover:text-brand-600"
                   >
                     {s.is_active ? "Pause" : "Resume"}
                   </button>

@@ -52,7 +52,7 @@ function ScoreBar({ label, value, max }) {
         </span>
       </div>
       <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-base-700">
-        <div className="h-full rounded-full bg-brass-500" style={{ width: `${pct}%` }} />
+        <div className="h-full rounded-full bg-brand-500" style={{ width: `${pct}%` }} />
       </div>
     </div>
   );
@@ -109,7 +109,7 @@ export default function CompanyProfile() {
     return (
       <div className="flex flex-col gap-4">
         <ErrorBanner message={error} />
-        <Link to="/companies" className="text-sm text-brass-400 hover:underline">
+        <Link to="/companies" className="text-sm text-brand-600 hover:underline">
           ← Back to companies
         </Link>
       </div>
@@ -119,7 +119,7 @@ export default function CompanyProfile() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <Link to="/companies" className="text-sm text-ink-500 hover:text-brass-400">
+        <Link to="/companies" className="text-sm text-ink-500 hover:text-brand-600">
           ← Back to companies
         </Link>
         <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
@@ -279,7 +279,7 @@ export default function CompanyProfile() {
                       href={s.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center justify-between gap-2 rounded-lg border border-base-700 bg-base-800/60 px-3 py-2 text-sm hover:border-brass-500"
+                      className="flex items-center justify-between gap-2 rounded-lg border border-base-700 bg-base-800/60 px-3 py-2 text-sm hover:border-brand-500"
                     >
                       <span className="font-medium text-ink-100">
                         {PLATFORM_LABELS[s.platform] || s.platform}
@@ -306,7 +306,7 @@ export default function CompanyProfile() {
                   >
                     <a
                       href={`mailto:${e.email}`}
-                      className="truncate text-ink-100 hover:text-brass-400"
+                      className="truncate text-ink-100 hover:text-brand-600"
                     >
                       {e.email}
                     </a>
@@ -329,7 +329,7 @@ export default function CompanyProfile() {
                     key={p.phone}
                     className="flex items-center justify-between gap-2 rounded-lg border border-base-700 bg-base-800/60 px-3 py-2 text-sm"
                   >
-                    <a href={`tel:${p.phone}`} className="text-ink-100 hover:text-brass-400">
+                    <a href={`tel:${p.phone}`} className="text-ink-100 hover:text-brand-600">
                       {p.phone}
                     </a>
                     <ValidityBadge isValid={p.is_valid} />
@@ -342,7 +342,7 @@ export default function CompanyProfile() {
           <Section title="Lead Score">
             {company.lead_score_breakdown ? (
               <div className="flex flex-col gap-4">
-                <div className="text-3xl font-semibold tabular-nums text-brass-400">
+                <div className="text-3xl font-semibold tabular-nums text-brand-600">
                   {company.lead_score_breakdown.score}
                   <span className="text-base text-ink-700">/100</span>
                 </div>

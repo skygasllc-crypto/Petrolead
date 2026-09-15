@@ -1,12 +1,11 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { REGIONS, INDUSTRIES, PRODUCTS, RESULT_LIMITS, COUNTRIES } from "../lib/constants";
 import DiscoveryProgress from "../components/DiscoveryProgress";
 import PreviewResultsTable from "../components/PreviewResultsTable";
 import ResultsToolbar from "../components/ResultsToolbar";
 import ErrorBanner from "../components/ErrorBanner";
-import QuickUrlLookup from "../components/QuickUrlLookup";
-import BulkContactLookup from "../components/BulkContactLookup";
 
 const INITIAL_FORM = {
   region: "",
@@ -30,7 +29,7 @@ function Field({ label, children }) {
 }
 
 const selectClasses =
-  "w-full rounded-md border border-base-600 bg-base-800 px-3 py-2 text-sm text-ink-100 focus:border-brass-500 focus:outline-none";
+  "w-full rounded-md border border-base-600 bg-base-800 px-3 py-2 text-sm text-ink-100 focus:border-brand-500 focus:outline-none";
 
 export default function Discover() {
   const [form, setForm] = useState(INITIAL_FORM);
@@ -176,16 +175,26 @@ export default function Discover() {
   return (
     <div className="flex flex-col gap-8">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-ink-100">Discover Companies</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-ink-100">Company Search</h1>
         <p className="mt-1 text-sm text-ink-500">
           Search public sources for petroleum, oil &amp; gas, and energy-trading companies
           matching your criteria.
         </p>
       </div>
 
-      <QuickUrlLookup />
-
-      <BulkContactLookup />
+      <Link
+        to="/email-finder"
+        className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-brand-100 bg-brand-50 px-5 py-4 text-sm transition-colors hover:border-brand-500"
+      >
+        <span>
+          <span className="font-semibold text-ink-100">Looking for a specific person&apos;s email?</span>{" "}
+          <span className="text-ink-500">
+            Use Email Finder with a LinkedIn profile link, a name and company, or a company
+            website.
+          </span>
+        </span>
+        <span className="font-semibold text-brand-600">Open Email Finder →</span>
+      </Link>
 
       <form
         onSubmit={handleSubmit}
@@ -282,7 +291,7 @@ export default function Discover() {
                   onClick={() => toggleProduct(product)}
                   className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
                     active
-                      ? "border-brass-500 bg-brass-500/15 text-brass-300"
+                      ? "border-brand-500 bg-brand-500/15 text-brand-600"
                       : "border-base-600 text-ink-500 hover:border-base-400 hover:text-ink-100"
                   }`}
                 >
@@ -300,7 +309,7 @@ export default function Discover() {
           <label className="flex items-start gap-2.5 rounded-lg border border-base-700 bg-base-800/40 p-3 text-sm">
             <input
               type="checkbox"
-              className="mt-0.5 accent-[var(--color-brass-500)]"
+              className="mt-0.5 accent-[var(--color-brand-500)]"
               checked={form.includeSocialSearch}
               onChange={(e) => update("includeSocialSearch", e.target.checked)}
             />
@@ -316,7 +325,7 @@ export default function Discover() {
           <label className="flex items-start gap-2.5 rounded-lg border border-base-700 bg-base-800/40 p-3 text-sm">
             <input
               type="checkbox"
-              className="mt-0.5 accent-[var(--color-brass-500)]"
+              className="mt-0.5 accent-[var(--color-brand-500)]"
               checked={form.includeB2bDirectories}
               onChange={(e) => update("includeB2bDirectories", e.target.checked)}
             />
@@ -335,9 +344,9 @@ export default function Discover() {
           <button
             type="submit"
             disabled={status === "loading"}
-            className="inline-flex w-full items-center justify-center rounded-md bg-brass-500 px-6 py-3 text-sm font-semibold text-base-950 transition-colors hover:bg-brass-400 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+            className="inline-flex w-full items-center justify-center rounded-md bg-brand-500 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
           >
-            {status === "loading" ? "Discovering..." : "Discover Companies"}
+            {status === "loading" ? "Searching..." : "Search Companies"}
           </button>
         </div>
       </form>
@@ -358,7 +367,7 @@ export default function Discover() {
             </div>
           )}
 
-          <div className="rounded-lg border border-brass-500/30 bg-brass-500/10 px-4 py-3 text-sm text-brass-300">
+          <div className="rounded-lg border border-brand-500/30 bg-brand-500/10 px-4 py-3 text-sm text-brand-600">
             <strong className="font-semibold">Nothing is saved yet.</strong> These results are a
             preview — click <strong>Save</strong> on a row, or <strong>Save All</strong> below, to
             add companies to your Companies list.
@@ -394,7 +403,7 @@ export default function Discover() {
                 type="button"
                 onClick={handleSaveAll}
                 disabled={savingAll || unsavedCount === 0}
-                className="rounded-md bg-brass-500 px-4 py-1.5 text-xs font-semibold text-base-950 transition-colors hover:bg-brass-400 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-md bg-brand-500 px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {savingAll
                   ? "Saving..."

@@ -78,7 +78,7 @@ export default function AdminUsers() {
                     <td className="px-4 py-3 text-ink-500">{u.full_name || "—"}</td>
                     <td className="px-4 py-3 text-ink-500">
                       {u.is_admin ? (
-                        <span className="rounded-full border border-brass-500/30 bg-brass-500/15 px-2 py-0.5 text-xs font-medium text-brass-300">
+                        <span className="rounded-full border border-brand-500/30 bg-brand-500/15 px-2 py-0.5 text-xs font-medium text-brand-600">
                           Admin
                         </span>
                       ) : (

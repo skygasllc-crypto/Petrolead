@@ -6,7 +6,7 @@ import Logo from "../components/Logo";
 import ErrorBanner from "../components/ErrorBanner";
 
 const inputClasses =
-  "w-full rounded-md border border-base-600 bg-base-800 px-3 py-2 text-sm text-ink-100 focus:border-brass-500 focus:outline-none";
+  "w-full rounded-md border border-base-600 bg-base-800 px-3 py-2 text-sm text-ink-100 focus:border-brand-500 focus:outline-none";
 
 export default function Login() {
   const { user, loading, login } = useAuth();
@@ -19,7 +19,7 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false);
 
   if (!loading && user) {
-    return <Navigate to={location.state?.from || "/"} replace />;
+    return <Navigate to={location.state?.from || "/dashboard"} replace />;
   }
 
   async function handleSubmit(e) {
@@ -28,7 +28,7 @@ export default function Login() {
     setError(null);
     try {
       await login(email, password);
-      navigate(location.state?.from || "/", { replace: true });
+      navigate(location.state?.from || "/dashboard", { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong.");
     } finally {
@@ -37,12 +37,14 @@ export default function Login() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-base-900 px-4">
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-brand-50 to-base-850 px-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 flex justify-center">
-          <Logo />
+          <Link to="/" aria-label="PetroLead home">
+            <Logo />
+          </Link>
         </div>
-        <div className="rounded-xl border border-base-700 bg-base-850 p-6">
+        <div className="rounded-2xl border border-base-700 bg-base-850 p-8 shadow-lg">
           <h1 className="text-lg font-semibold text-ink-100">Log in</h1>
           <p className="mt-1 text-sm text-ink-500">
             Access your petroleum lead intelligence workspace.
@@ -83,7 +85,7 @@ export default function Login() {
             <button
               type="submit"
               disabled={submitting}
-              className="mt-2 inline-flex items-center justify-center rounded-md bg-brass-500 px-4 py-2.5 text-sm font-semibold text-base-950 transition-colors hover:bg-brass-400 disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-2 inline-flex items-center justify-center rounded-md bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {submitting ? "Logging in..." : "Log In"}
             </button>
@@ -91,7 +93,7 @@ export default function Login() {
         </div>
         <p className="mt-4 text-center text-sm text-ink-500">
           Don&apos;t have an account?{" "}
-          <Link to="/register" className="text-brass-400 hover:underline">
+          <Link to="/register" className="text-brand-600 hover:underline">
             Create one
           </Link>
         </p>

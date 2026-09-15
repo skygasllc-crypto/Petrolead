@@ -6,7 +6,7 @@ import Logo from "../components/Logo";
 import ErrorBanner from "../components/ErrorBanner";
 
 const inputClasses =
-  "w-full rounded-md border border-base-600 bg-base-800 px-3 py-2 text-sm text-ink-100 focus:border-brass-500 focus:outline-none";
+  "w-full rounded-md border border-base-600 bg-base-800 px-3 py-2 text-sm text-ink-100 focus:border-brand-500 focus:outline-none";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -22,7 +22,7 @@ export default function Register() {
   const [submitting, setSubmitting] = useState(false);
 
   if (!loading && user) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/dashboard" replace />;
   }
 
   async function handleSubmit(e) {
@@ -41,7 +41,7 @@ export default function Register() {
     setSubmitting(true);
     try {
       await register(email, password, fullName);
-      navigate("/", { replace: true });
+      navigate("/dashboard", { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong.");
     } finally {
@@ -50,12 +50,14 @@ export default function Register() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-base-900 px-4">
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-brand-50 to-base-850 px-4 py-10">
       <div className="w-full max-w-sm">
         <div className="mb-8 flex justify-center">
-          <Logo />
+          <Link to="/" aria-label="PetroLead home">
+            <Logo />
+          </Link>
         </div>
-        <div className="rounded-xl border border-base-700 bg-base-850 p-6">
+        <div className="rounded-2xl border border-base-700 bg-base-850 p-8 shadow-lg">
           <h1 className="text-lg font-semibold text-ink-100">Create an account</h1>
           <p className="mt-1 text-sm text-ink-500">
             Set up access to PetroLead&apos;s petroleum lead intelligence platform.
@@ -124,7 +126,7 @@ export default function Register() {
             <button
               type="submit"
               disabled={submitting}
-              className="mt-2 inline-flex items-center justify-center rounded-md bg-brass-500 px-4 py-2.5 text-sm font-semibold text-base-950 transition-colors hover:bg-brass-400 disabled:cursor-not-allowed disabled:opacity-60"
+              className="mt-2 inline-flex items-center justify-center rounded-md bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {submitting ? "Creating account..." : "Create Account"}
             </button>
@@ -132,7 +134,7 @@ export default function Register() {
         </div>
         <p className="mt-4 text-center text-sm text-ink-500">
           Already have an account?{" "}
-          <Link to="/login" className="text-brass-400 hover:underline">
+          <Link to="/login" className="text-brand-600 hover:underline">
             Log in
           </Link>
         </p>

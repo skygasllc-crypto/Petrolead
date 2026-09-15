@@ -9,7 +9,7 @@ import ValidityBadge from "../components/ValidityBadge";
 const PAGE_SIZE = 25;
 
 const selectClasses =
-  "rounded-md border border-base-600 bg-base-800 px-3 py-2 text-sm text-ink-100 focus:border-brass-500 focus:outline-none";
+  "rounded-md border border-base-600 bg-base-800 px-3 py-2 text-sm text-ink-100 focus:border-brand-500 focus:outline-none";
 
 export default function Emails() {
   const [items, setItems] = useState([]);
@@ -97,14 +97,14 @@ export default function Emails() {
           <button
             type="button"
             onClick={() => handleExport("csv")}
-            className="rounded-md border border-base-600 px-4 py-2 text-sm font-medium text-ink-300 hover:border-brass-500 hover:text-brass-400"
+            className="rounded-md border border-base-600 px-4 py-2 text-sm font-medium text-ink-300 hover:border-brand-500 hover:text-brand-600"
           >
             Export CSV
           </button>
           <button
             type="button"
             onClick={() => handleExport("xlsx")}
-            className="rounded-md border border-base-600 px-4 py-2 text-sm font-medium text-ink-300 hover:border-brass-500 hover:text-brass-400"
+            className="rounded-md border border-base-600 px-4 py-2 text-sm font-medium text-ink-300 hover:border-brand-500 hover:text-brand-600"
           >
             Export Excel
           </button>
@@ -117,7 +117,7 @@ export default function Emails() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search emails..."
-          className="w-full max-w-xs rounded-md border border-base-600 bg-base-800 px-3 py-2 text-sm text-ink-100 placeholder:text-ink-700 focus:border-brass-500 focus:outline-none"
+          className="w-full max-w-xs rounded-md border border-base-600 bg-base-800 px-3 py-2 text-sm text-ink-100 placeholder:text-ink-700 focus:border-brand-500 focus:outline-none"
         />
         <select value={isValid} onChange={(e) => setIsValid(e.target.value)} className={selectClasses}>
           <option value="">Any verification status</option>
@@ -192,7 +192,7 @@ export default function Emails() {
                   <td className="px-4 py-3">
                     <a
                       href={`mailto:${e.email}`}
-                      className="font-medium text-ink-100 hover:text-brass-400"
+                      className="font-medium text-ink-100 hover:text-brand-600"
                     >
                       {e.email}
                     </a>
@@ -213,7 +213,7 @@ export default function Emails() {
                   <td className="px-4 py-3">
                     <Link
                       to={`/companies/${e.company_id}`}
-                      className="text-ink-300 hover:text-brass-400"
+                      className="text-ink-300 hover:text-brand-600"
                     >
                       {e.company_name}
                     </Link>

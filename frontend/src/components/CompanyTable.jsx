@@ -70,7 +70,7 @@ export default function CompanyTable({ companies, emptyMessage = "No companies f
                   >
                     {col.label}
                     {sortKey === col.key && (
-                      <span className="text-brass-400">{sortDir === "asc" ? "↑" : "↓"}</span>
+                      <span className="text-brand-600">{sortDir === "asc" ? "↑" : "↓"}</span>
                     )}
                   </button>
                 ) : (
@@ -90,7 +90,7 @@ export default function CompanyTable({ companies, emptyMessage = "No companies f
                 <div className="flex items-center gap-2">
                   <Link
                     to={`/companies/${company.id}`}
-                    className="font-medium text-ink-100 hover:text-brass-400"
+                    className="font-medium text-ink-100 hover:text-brand-600"
                   >
                     {company.company_name}
                   </Link>

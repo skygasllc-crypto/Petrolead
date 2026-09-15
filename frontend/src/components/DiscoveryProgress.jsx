@@ -21,7 +21,7 @@ export default function DiscoveryProgress() {
   return (
     <div className="flex flex-col items-center justify-center gap-4 rounded-xl border border-base-700 bg-base-850 px-6 py-14 text-center">
       <div className="relative h-12 w-12">
-        <div className="absolute inset-0 animate-spin rounded-full border-2 border-base-600 border-t-brass-500" />
+        <div className="absolute inset-0 animate-spin rounded-full border-2 border-base-600 border-t-brand-500" />
       </div>
       <div>
         <p className="text-sm font-medium text-ink-100">{STEPS[stepIndex]}</p>
@@ -32,7 +32,7 @@ export default function DiscoveryProgress() {
           <li
             key={step}
             className={`h-1.5 w-8 rounded-full transition-colors ${
-              i <= stepIndex ? "bg-brass-500" : "bg-base-700"
+              i <= stepIndex ? "bg-brand-500" : "bg-base-700"
             }`}
           />
         ))}

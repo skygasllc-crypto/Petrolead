@@ -4,7 +4,7 @@ export default function StatCard({ label, value, hint, accent = false }) {
       <div className="text-xs font-medium uppercase tracking-wide text-ink-700">{label}</div>
       <div
         className={`mt-2 text-3xl font-semibold tabular-nums ${
-          accent ? "text-brass-400" : "text-ink-100"
+          accent ? "text-brand-600" : "text-ink-100"
         }`}
       >
         {value}

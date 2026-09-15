@@ -116,7 +116,7 @@ export default function Settings() {
           ))}
         </ol>
         <p className="mt-4 text-xs text-ink-700">
-          Phases 5 and 6 are partially implemented: the &quot;Discover Companies&quot; form has
+          Phases 5 and 6 are partially implemented: the &quot;Company Search&quot; form has
           opt-in checkboxes that find LinkedIn/Facebook company pages and B2B-directory listings
           through your configured search provider&apos;s <code className="rounded bg-base-800 px-1 py-0.5">
             site:

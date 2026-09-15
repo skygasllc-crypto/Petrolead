@@ -8,7 +8,7 @@ import ErrorBanner from "../components/ErrorBanner";
 const PAGE_SIZE = 25;
 
 const selectClasses =
-  "rounded-md border border-base-600 bg-base-800 px-3 py-2 text-sm text-ink-100 focus:border-brass-500 focus:outline-none";
+  "rounded-md border border-base-600 bg-base-800 px-3 py-2 text-sm text-ink-100 focus:border-brand-500 focus:outline-none";
 
 export default function Companies() {
   const [items, setItems] = useState([]);
@@ -108,14 +108,14 @@ export default function Companies() {
           <button
             type="button"
             onClick={() => handleExport("csv")}
-            className="rounded-md border border-base-600 px-4 py-2 text-sm font-medium text-ink-300 hover:border-brass-500 hover:text-brass-400"
+            className="rounded-md border border-base-600 px-4 py-2 text-sm font-medium text-ink-300 hover:border-brand-500 hover:text-brand-600"
           >
             Export CSV
           </button>
           <button
             type="button"
             onClick={() => handleExport("xlsx")}
-            className="rounded-md border border-base-600 px-4 py-2 text-sm font-medium text-ink-300 hover:border-brass-500 hover:text-brass-400"
+            className="rounded-md border border-base-600 px-4 py-2 text-sm font-medium text-ink-300 hover:border-brand-500 hover:text-brand-600"
           >
             Export Excel
           </button>
@@ -187,7 +187,7 @@ export default function Companies() {
             step="5"
             value={minLeadScore}
             onChange={(e) => setMinLeadScore(Number(e.target.value))}
-            className="w-28 accent-[var(--color-brass-500)]"
+            className="w-28 accent-[var(--color-brand-500)]"
           />
           <span className="w-8 tabular-nums text-ink-300">{minLeadScore}</span>
         </label>

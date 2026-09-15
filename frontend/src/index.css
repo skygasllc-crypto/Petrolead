@@ -2,44 +2,48 @@
 
 @theme {
   --font-sans:
-    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 
-  /* Base surfaces — deep navy / charcoal industrial palette */
-  --color-base-950: #070b14;
-  --color-base-900: #0b1220;
-  --color-base-850: #0f1729;
-  --color-base-800: #131c2e;
-  --color-base-700: #1a2438;
-  --color-base-600: #24304a;
-  --color-base-500: #2e3a58;
-  --color-base-400: #4a5a7c;
+  /* Base surfaces — light theme. Numbers are kept from the original scale
+     so existing classes still map: 850 = cards, 900 = page, 700/600 = borders. */
+  --color-base-950: #ffffff;
+  --color-base-900: #f5f8fc;
+  --color-base-850: #ffffff;
+  --color-base-800: #f7f9fc;
+  --color-base-700: #e5e7eb;
+  --color-base-600: #d1d5db;
+  --color-base-500: #adadad;
+  --color-base-400: #9ca3af;
 
-  /* Text */
-  --color-ink-100: #f4f6fb;
-  --color-ink-300: #cbd4e6;
-  --color-ink-500: #93a1b8;
-  --color-ink-700: #64749a;
+  /* Text — 100 is primary, 700 is the most muted */
+  --color-ink-100: #1e2022;
+  --color-ink-300: #333333;
+  --color-ink-500: #5f6673;
+  --color-ink-700: #7a7a7a;
 
-  /* Brand accent — brass / amber, evokes refined petroleum & energy */
-  --color-brass-300: #e9c877;
-  --color-brass-400: #d9b25f;
-  --color-brass-500: #c89b3c;
-  --color-brass-600: #a9802e;
+  /* Brand — bright blue primary with a deep navy for hover/emphasis */
+  --color-brand-50: #ebf5ff;
+  --color-brand-100: #d0dffb;
+  --color-brand-500: #087def;
+  --color-brand-600: #0a66c9;
+  --color-brand-700: #003cab;
+  --color-brand-900: #0f1b2d;
 
   /* Secondary accent — teal, used for data/relevance highlights */
-  --color-teal-400: #2dd4bf;
-  --color-teal-500: #14b8a6;
+  --color-teal-400: #0d9488;
+  --color-teal-500: #0f766e;
 
-  /* Status */
-  --color-status-high: #34d399;
-  --color-status-relevant: #2dd4bf;
-  --color-status-possible: #d9b25f;
-  --color-status-low: #64748b;
-  --color-status-danger: #f87171;
+  /* Status — darkened so text stays readable on white */
+  --color-status-high: #059669;
+  --color-status-relevant: #0d9488;
+  --color-status-possible: #d97706;
+  --color-status-low: #6b7280;
+  --color-status-danger: #dc2626;
 }
 
 html {
-  color-scheme: dark;
+  color-scheme: light;
+  scroll-behavior: smooth;
 }
 
 body {
@@ -50,11 +54,10 @@ body {
 }
 
 ::selection {
-  background-color: var(--color-brass-500);
-  color: var(--color-base-950);
+  background-color: var(--color-brand-500);
+  color: #ffffff;
 }
 
-/* Subtle scrollbar to match the industrial dark theme */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;

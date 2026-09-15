@@ -74,7 +74,7 @@ export default function SearchHistory() {
                     {search.products?.map((p) => (
                       <span
                         key={p}
-                        className="rounded-full border border-brass-500/30 bg-brass-500/10 px-2.5 py-0.5 text-xs text-brass-300"
+                        className="rounded-full border border-brand-500/30 bg-brand-500/10 px-2.5 py-0.5 text-xs text-brand-600"
                       >
                         {p}
                       </span>

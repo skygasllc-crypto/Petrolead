@@ -41,9 +41,9 @@ export default function Dashboard() {
         </div>
         <Link
           to="/discover"
-          className="inline-flex items-center rounded-md bg-brass-500 px-5 py-2.5 text-sm font-semibold text-base-950 hover:bg-brass-400"
+          className="inline-flex items-center rounded-md bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-700"
         >
-          Discover Companies
+          Search Companies
         </Link>
       </div>
 
@@ -74,7 +74,7 @@ export default function Dashboard() {
             <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-700">
               Recently discovered
             </h2>
-            <Link to="/companies" className="text-xs text-brass-400 hover:underline">
+            <Link to="/companies" className="text-xs text-brand-600 hover:underline">
               View all
             </Link>
           </div>
@@ -90,7 +90,7 @@ export default function Dashboard() {
                   <div className="min-w-0">
                     <Link
                       to={`/companies/${c.id}`}
-                      className="truncate text-sm font-medium text-ink-100 hover:text-brass-400"
+                      className="truncate text-sm font-medium text-ink-100 hover:text-brand-600"
                     >
                       {c.company_name}
                     </Link>
@@ -110,7 +110,7 @@ export default function Dashboard() {
             <h2 className="text-sm font-semibold uppercase tracking-wide text-ink-700">
               Recent searches
             </h2>
-            <Link to="/searches" className="text-xs text-brass-400 hover:underline">
+            <Link to="/searches" className="text-xs text-brand-600 hover:underline">
               View all
             </Link>
           </div>

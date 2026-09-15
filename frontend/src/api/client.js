@@ -147,6 +147,9 @@ export const api = {
 
   exportEmails: (params = {}) => requestDownload("/emails/export", params),
 
+  verifyEmails: (emails) =>
+    request("/emails/verify", { method: "POST", body: JSON.stringify({ emails }) }),
+
   listSavedSearches: () => request("/saved-searches"),
 
   createSavedSearch: (payload) =>

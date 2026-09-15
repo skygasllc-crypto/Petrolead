@@ -1,7 +1,5 @@
 // Shared "verified / unverified / check pending" pill for an is_valid
-// tri-state (true/false/null), used for both emails and phone numbers
-// wherever they're shown as a labeled badge (as opposed to the compact
-// dot used in QuickUrlLookup.jsx, which is a different visual treatment).
+// tri-state (true/false/null), used for both emails and phone numbers.
 export default function ValidityBadge({ isValid }) {
   if (isValid === true) {
     return (

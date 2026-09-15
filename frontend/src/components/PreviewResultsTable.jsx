@@ -80,7 +80,7 @@ export default function PreviewResultsTable({
                   >
                     {col.label}
                     {sortKey === col.key && (
-                      <span className="text-brass-400">{sortDir === "asc" ? "↑" : "↓"}</span>
+                      <span className="text-brand-600">{sortDir === "asc" ? "↑" : "↓"}</span>
                     )}
                   </button>
                 ) : (
@@ -102,7 +102,7 @@ export default function PreviewResultsTable({
                   {state.companyId ? (
                     <Link
                       to={`/companies/${state.companyId}`}
-                      className="font-medium text-ink-100 hover:text-brass-400"
+                      className="font-medium text-ink-100 hover:text-brand-600"
                     >
                       {company.company_name}
                     </Link>
@@ -155,7 +155,7 @@ export default function PreviewResultsTable({
                       type="button"
                       onClick={() => onSave(index)}
                       disabled={state.status === "saving"}
-                      className="rounded-md border border-brass-500/60 px-3 py-1 text-xs font-semibold text-brass-300 transition-colors hover:bg-brass-500/15 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="rounded-md border border-brand-500/60 px-3 py-1 text-xs font-semibold text-brand-600 transition-colors hover:bg-brand-500/15 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {state.status === "saving" ? "Saving..." : "Save"}
                     </button>
