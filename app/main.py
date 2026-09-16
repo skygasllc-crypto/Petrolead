@@ -42,11 +42,8 @@ async def lifespan(app: FastAPI):
         settings.database_url.split("://")[0] + "://***",
         settings.search_provider,
     )
-    if settings.using_default_secret_key and settings.app_env != "development":
-        logger.warning(
-            "SECRET_KEY is still the insecure development default outside a "
-            "development environment — set a real random value in .env."
-        )
+    # A default SECRET_KEY outside development doesn't get this far: the
+    # settings refuse to load at all (see `app.config`).
     yield
     logger.info("PetroLead shutting down")
 

@@ -1,4 +1,10 @@
-const API_BASE = "/api";
+// Same-origin by default: the Vite dev server proxies /api to the backend,
+// and so does any deploy that serves both from one host. When the SPA and
+// the API are separate services (the managed-platform setup in
+// docs/DEPLOY.md), set VITE_API_BASE_URL to the API's full base, e.g.
+// https://petrolead-api.onrender.com/api. It is baked into the bundle at
+// build time and visible to anyone — never put a secret in it.
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/+$/, "");
 const TOKEN_STORAGE_KEY = "petrolead_token";
 
 class ApiError extends Error {

@@ -1,0 +1,154 @@
+# Render blueprint — API, worker, database, cache and the static frontend.
+#
+# Create it once with Render's "New > Blueprint" pointed at this repo. Values
+# marked `sync: false` are NOT stored here: set them in the dashboard, so no
+# key or wallet address is ever committed. See docs/DEPLOY.md.
+#
+# Adapting this to Railway or Fly.io means the same four pieces with that
+# platform's own config file — the env vars below are what actually matter.
+
+services:
+  - type: web
+    name: petrolead-api
+    runtime: docker
+    plan: starter
+    healthCheckPath: /api/health
+    # Migrations run once per release, before the new instances take traffic.
+    preDeployCommand: alembic upgrade head
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DEBUG
+        value: "false"
+      # Several workers share one database, so startup migrations would race.
+      - key: RUN_MIGRATIONS_ON_STARTUP
+        value: "false"
+      # Generated once by Render and never shown in this file. Changing it
+      # logs every user out, so treat it as permanent.
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: petrolead-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: petrolead-cache
+          property: connectionString
+      # The static site's URL, e.g. https://petrolead-web.onrender.com plus
+      # your own domain. Without it the browser blocks every API call.
+      - key: CORS_ORIGINS
+        sync: false
+      - key: APP_BASE_URL
+        sync: false
+      - key: ADMIN_EMAILS
+        sync: false
+      - key: BILLING_ENFORCED
+        value: "true"
+      # Search provider: set SEARCH_PROVIDER and the matching key, or the app
+      # serves mock data that is clearly labelled as fake.
+      - key: SEARCH_PROVIDER
+        sync: false
+      - key: SERPER_API_KEY
+        sync: false
+      - key: SEARCHAPI_IO_API_KEY
+        sync: false
+      - key: GOOGLE_CSE_API_KEY
+        sync: false
+      - key: GOOGLE_CSE_ENGINE_ID
+        sync: false
+      - key: HUNTER_IO_API_KEY
+        sync: false
+      # PUBLIC receiving addresses only. Never a private key or seed phrase.
+      - key: CRYPTO_BTC_ADDRESS
+        sync: false
+      - key: CRYPTO_USDT_TRC20_ADDRESS
+        sync: false
+      - key: CRYPTO_TRX_ADDRESS
+        sync: false
+      - key: COINGECKO_API_KEY
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_USERNAME
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+
+  # Runs scheduled searches. Without it, saved searches only run when
+  # somebody calls POST /api/saved-searches/run-due by hand.
+  - type: worker
+    name: petrolead-worker
+    runtime: docker
+    plan: starter
+    dockerCommand: celery -A app.worker worker --beat --loglevel=info
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: RUN_MIGRATIONS_ON_STARTUP
+        value: "false"
+      # The worker verifies the same session tokens, so it needs the same key.
+      - key: SECRET_KEY
+        fromService:
+          type: web
+          name: petrolead-api
+          envVarKey: SECRET_KEY
+      - key: DATABASE_URL
+        fromDatabase:
+          name: petrolead-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: petrolead-cache
+          property: connectionString
+      - key: SEARCH_PROVIDER
+        sync: false
+      - key: SERPER_API_KEY
+        sync: false
+      - key: SEARCHAPI_IO_API_KEY
+        sync: false
+      - key: HUNTER_IO_API_KEY
+        sync: false
+
+  - type: web
+    name: petrolead-web
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      # Baked into the bundle at build time, so it must be a public URL and
+      # never a secret: the API service's address plus /api.
+      - key: VITE_API_BASE_URL
+        sync: false
+    routes:
+      # A single-page app: every unknown path is served index.html, or a
+      # refresh on /pricing returns 404.
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+
+  - type: keyvalue
+    name: petrolead-cache
+    plan: starter
+    # Reachable only from the services above.
+    ipAllowList: []
+
+databases:
+  - name: petrolead-db
+    plan: basic-256mb
+    postgresMajorVersion: "16"

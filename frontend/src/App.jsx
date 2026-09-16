@@ -9,6 +9,8 @@ import CompanySearch from "./pages/CompanySearch";
 import EmailExtractor from "./pages/EmailExtractor";
 import EmailVerifierProduct from "./pages/EmailVerifierProduct";
 import Pricing from "./pages/Pricing";
+import Terms from "./pages/Terms";
+import Privacy from "./pages/Privacy";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
@@ -39,6 +41,8 @@ export default function App() {
         <Route path="/email-extractor" element={<EmailExtractor />} />
         <Route path="/email-verifier" element={<EmailVerifierProduct />} />
         <Route path="/pricing" element={<Pricing />} />
+        <Route path="/terms" element={<Terms />} />
+        <Route path="/privacy" element={<Privacy />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
 

@@ -286,16 +286,21 @@ process for scheduled searches. Run the frontend separately with
 `npm run dev` (or add a frontend service/Dockerfile when it's ready to
 containerize).
 
+For a real deployment — managed Postgres, a signing key, migrations as a
+release step, backups and the post-deploy checks — see
+[`docs/DEPLOY.md`](docs/DEPLOY.md). `render.yaml` in the repo root is a
+working blueprint for that setup.
+
 ---
 
 ## Running Tests
 
 ```bash
-source .venv/bin/activate
+source venv/bin/activate
 python -m pytest tests/ -v
 ```
 
-91 tests, covering:
+348 tests, covering:
 
 - **Normalization** — corporate-suffix stripping, punctuation/case handling,
   domain extraction.
@@ -321,6 +326,25 @@ Tests run against an isolated SQLite database and the mock search provider
 does a real DNS lookup against the reserved `.invalid` TLD, which is
 guaranteed never to resolve — it tolerates a network-less environment by
 accepting either `False` or `None`.)
+
+---
+
+### Browser tests
+
+Click-through tests for the frontend — the marketing pages, the in-app
+tools, checkout and the admin payment review — with every `/api` call
+mocked in the browser, so a run never touches the database or spends
+credits. They need the Vite dev server running:
+
+```bash
+cd frontend
+npm run dev        # in one terminal
+npm run test:e2e   # in another
+```
+
+See [`frontend/e2e/README.md`](frontend/e2e/README.md) for the browser
+requirements and the two environment variables that point the runner at a
+different server or Chromium.
 
 ---
 

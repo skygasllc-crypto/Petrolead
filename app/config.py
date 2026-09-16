@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -103,6 +104,32 @@ class Settings(BaseSettings):
 
     # --- Logging ---
     log_level: str = "INFO"
+
+    @field_validator("database_url")
+    @classmethod
+    def normalize_database_url(cls, value: str) -> str:
+        """Managed platforms hand out `postgres://` URLs, which SQLAlchemy 2
+        rejects — it wants an explicit driver, and psycopg 3 is what's
+        installed. Rewriting here means a platform's connection string can be
+        used verbatim."""
+        for prefix in ("postgres://", "postgresql://"):
+            if value.startswith(prefix):
+                return "postgresql+psycopg://" + value[len(prefix) :]
+        return value
+
+    @model_validator(mode="after")
+    def refuse_insecure_production_secrets(self) -> Settings:
+        """Refuse to start outside development with the shared dev signing
+        key. Anyone who has read this open-source default could otherwise
+        mint a valid session token for any account, so this is a hard stop
+        rather than a warning that scrolls past in a deploy log."""
+        if self.app_env != "development" and self.using_default_secret_key:
+            raise ValueError(
+                "SECRET_KEY is still the insecure development default while APP_ENV="
+                f"{self.app_env!r}. Generate one with: "
+                'python -c "import secrets; print(secrets.token_hex(32))"'
+            )
+        return self
 
     @property
     def cors_origins_list(self) -> list[str]:

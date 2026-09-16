@@ -18,6 +18,13 @@ const COLUMNS = [
       { label: "FAQ", to: "/#faq" },
     ],
   },
+  {
+    title: "Legal",
+    links: [
+      { label: "Terms of Service", to: "/terms" },
+      { label: "Privacy Policy", to: "/privacy" },
+    ],
+  },
 ];
 
 export default function SiteFooter() {
