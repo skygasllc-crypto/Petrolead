@@ -105,7 +105,7 @@ function AwaitingPayment({ order, onUpdated, onCancelled }) {
     setBusy(true);
     setError(null);
     try {
-      onUpdated(await api.markOrderPaid(order.id, txHash.trim()));
+      onUpdated(await api.markOrderPaid(order.id, txHash.trim() || undefined));
     } catch (err) {
       setError(errorMessage(err, "Couldn't mark this order as paid."));
     } finally {
@@ -163,31 +163,37 @@ function AwaitingPayment({ order, onUpdated, onCancelled }) {
         </div>
 
         <h2 className="mt-8 text-base font-semibold text-ink-100">2. Tell us you&apos;ve paid</h2>
+        <p className="mt-2 text-sm leading-relaxed text-ink-500">
+          Once you&apos;ve sent the payment, click below. We&apos;ll match it to your reference{" "}
+          <strong className="font-mono font-semibold text-ink-100">{order.reference}</strong> by the
+          amount and time, and activate your plan once it&apos;s confirmed.
+        </p>
         <form onSubmit={markPaid} className="mt-3">
-          <label htmlFor="tx-hash" className="text-sm font-medium text-ink-300">
-            Transaction ID (TXID)
-          </label>
-          <input
-            id="tx-hash"
-            value={txHash}
-            onChange={(e) => setTxHash(e.target.value)}
-            required
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="The 64-character ID of your transaction"
-            className="mt-1.5 w-full rounded-md border border-base-600 bg-base-850 px-3 py-2.5 font-mono text-sm text-ink-100 placeholder:font-sans placeholder:text-ink-700 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
-          />
-          <p className="mt-1.5 text-xs text-ink-700">
-            You&apos;ll find it in your wallet, or in your exchange&apos;s withdrawal history, once
-            the payment is sent.
-          </p>
+          <details className="text-sm">
+            <summary className="cursor-pointer text-ink-500 hover:text-ink-100">
+              Have the transaction ID? Add it (optional)
+            </summary>
+            <input
+              id="tx-hash"
+              value={txHash}
+              onChange={(e) => setTxHash(e.target.value)}
+              autoComplete="off"
+              spellCheck={false}
+              aria-label="Transaction ID (optional)"
+              placeholder="The 64-character ID of your transaction"
+              className="mt-2 w-full rounded-md border border-base-600 bg-base-850 px-3 py-2.5 font-mono text-sm text-ink-100 placeholder:font-sans placeholder:text-ink-700 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+            />
+            <p className="mt-1.5 text-xs text-ink-700">
+              It helps us find your payment faster, but it isn&apos;t needed.
+            </p>
+          </details>
           {error && (
             <p role="alert" className="mt-3 text-sm text-status-danger">
               {error}
             </p>
           )}
           <div className="mt-5 flex flex-wrap items-center gap-5">
-            <button type="submit" disabled={busy || !txHash.trim()} className={primaryButton}>
+            <button type="submit" disabled={busy} className={primaryButton}>
               {busy ? "Sending..." : "I have paid"}
             </button>
             <button
@@ -229,10 +235,12 @@ function Notice({ icon, tone, title, children }) {
 }
 
 function TransactionLink({ order }) {
-  if (!order.tx_hash) return null;
+  if (!order.tx_hash) {
+    return <p className="mt-3 font-mono text-xs text-ink-700">Reference {order.reference}</p>;
+  }
   return (
     <p className="mt-3 break-all font-mono text-xs text-ink-700">
-      TXID {order.tx_hash} ·{" "}
+      {order.reference} · TXID {order.tx_hash} ·{" "}
       <a
         href={order.explorer_url}
         target="_blank"
@@ -300,6 +308,10 @@ export default function PaymentOrder() {
           <p className="mt-1 text-sm text-ink-500">
             {order.credits_per_month.toLocaleString()} credits/month ·{" "}
             {order.billing_period === "yearly" ? "12 months" : "1 month"} · ${order.amount_usd}
+          </p>
+          <p className="mt-1 text-sm text-ink-700">
+            Reference{" "}
+            <span className="font-mono font-semibold text-ink-300">{order.reference}</span>
           </p>
         </div>
         <OrderStatusBadge status={order.status} />

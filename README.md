@@ -353,11 +353,11 @@ accepting either `False` or `None`.)
 | `GET` | `/api/billing/payment-methods` | Coins accepted for plans (those with a receiving address configured). |
 | `POST` | `/api/billing/orders` | Start paying for a plan — body: `plan`, `credits_per_month`, `billing_period` (`monthly`\|`yearly`), `currency` (`BTC`\|`USDT_TRC20`\|`TRX`). Returns the address and exact amount; the price comes from `app/services/plans.py`. |
 | `GET` | `/api/billing/orders` / `/api/billing/orders/{id}` | The current user's payment orders. |
-| `POST` | `/api/billing/orders/{id}/paid` | "I have paid" — body: `{"tx_hash"}`. Notifies admins. A transaction ID can only be used once. |
+| `POST` | `/api/billing/orders/{id}/paid` | "I have paid" — no body needed; optional `{"tx_hash"}`. Notifies admins. A transaction ID, when given, can only be used once. |
 | `POST` | `/api/billing/orders/{id}/cancel` | Cancel an order that hasn't been marked paid. |
 | `GET` | `/api/admin/payments` | *(admin)* Payment orders, optionally `?status=submitted`. |
 | `GET` | `/api/admin/payments/pending-count` | *(admin)* How many payments are waiting for confirmation. |
-| `POST` | `/api/admin/payments/{id}/confirm` | *(admin)* Confirm a checked payment — starts, renews or changes the customer's plan. |
+| `POST` | `/api/admin/payments/{id}/confirm` | *(admin)* Confirm a checked payment — starts, renews or changes the customer's plan. Optional body: `{"note", "tx_hash"}` to record the transaction you matched. |
 | `POST` | `/api/admin/payments/{id}/reject` | *(admin)* Reject a payment — body: `{"note"}`, shown to the customer. |
 | `GET` | `/api/admin/users` | *(admin)* Every account, with its plan and credit balance. |
 | `PATCH` | `/api/admin/users/{id}` | *(admin)* Block/unblock — body: `{"is_active": bool}`. |
@@ -402,14 +402,18 @@ with no payment processor involved:
    address (from `CRYPTO_*_ADDRESS`) and the exact amount — USDT at 1:1 with
    the dollar, BTC and TRX from a live CoinGecko price held for
    `CRYPTO_QUOTE_MINUTES`.
-2. The customer sends the coins and clicks **I have paid**, entering the
-   transaction ID. Admins see a badge on **Payments** (and get an email if
-   SMTP is configured).
-3. An admin opens the payment, follows the explorer link (mempool.space for
-   BTC, tronscan.org for TRON), and checks that the transaction sent at
-   least the amount shown to your address on the right network. **Confirm
-   payment** starts, renews or changes the plan for 1 or 12 months;
-   **Reject** records a note the customer sees.
+2. The customer sends the coins and clicks **I have paid** — nothing to
+   type. Every order carries a reference the app generates (`PL-…`), which
+   identifies it in the app; BTC and TRC-20 transfers have no memo field, so
+   it never travels with the coins. A transaction ID is optional, from
+   either side. Admins see a badge on **Payments** (and get an email if SMTP
+   is configured).
+3. An admin opens the payment and checks the receiving address on a block
+   explorer (mempool.space for BTC, tronscan.org for TRON): at least the
+   amount shown should have arrived, on the right network, around the time
+   the order was marked paid. **Confirm payment** starts, renews or changes
+   the plan for 1 or 12 months, and can record the transaction ID that was
+   matched; **Reject** records a note the customer sees.
 
 Paid plans end when their paid period does (credits stop renewing and the
 tools are blocked until the customer pays again); nothing renews

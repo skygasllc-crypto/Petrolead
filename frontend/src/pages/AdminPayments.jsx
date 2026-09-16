@@ -21,13 +21,17 @@ function Detail({ label, children }) {
 function PaymentCard({ order, busy, onConfirm, onReject }) {
   const [rejecting, setRejecting] = useState(false);
   const [note, setNote] = useState("");
+  const [txHash, setTxHash] = useState("");
   const explorerName = order.explorer_url ? new URL(order.explorer_url).hostname : null;
 
   return (
     <li className="rounded-2xl border border-base-700 bg-base-850 p-5 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="text-base font-semibold text-ink-100">{order.customer_email}</div>
+          <div className="text-base font-semibold text-ink-100">
+            {order.customer_email}{" "}
+            <span className="font-mono text-sm font-medium text-ink-500">{order.reference}</span>
+          </div>
           <div className="text-xs text-ink-500">
             {order.submitted_at
               ? `Marked paid ${formatDateTime(order.submitted_at)}`
@@ -66,7 +70,9 @@ function PaymentCard({ order, busy, onConfirm, onReject }) {
               </a>
             </>
           ) : (
-            <span className="text-ink-700">Not marked paid yet</span>
+            <span className="text-ink-700">
+              Not given — match by amount and time on the address above
+            </span>
           )}
         </Detail>
       </dl>
@@ -84,12 +90,22 @@ function PaymentCard({ order, busy, onConfirm, onReject }) {
       {order.status === "submitted" && (
         <div className="mt-5 border-t border-base-700 pt-4">
           <p className="text-xs leading-relaxed text-ink-700">
-            Open the explorer link and check the transaction sent at least{" "}
+            Check on the block explorer that at least{" "}
             <strong className="font-semibold text-ink-300">
               {order.amount_crypto} {order.coin_symbol}
             </strong>{" "}
-            to the address above on the {order.network} network before confirming.
+            arrived at the address above on the {order.network} network, around the time this was
+            marked paid, before confirming.
           </p>
+          {!order.tx_hash && !rejecting && (
+            <input
+              value={txHash}
+              onChange={(e) => setTxHash(e.target.value)}
+              aria-label={`Transaction ID for ${order.reference} (optional)`}
+              placeholder="Transaction ID you matched (optional)"
+              className="mt-3 w-full max-w-md rounded-md border border-base-600 bg-base-850 px-3 py-2 font-mono text-xs text-ink-100 placeholder:font-sans placeholder:text-ink-700 focus:border-brand-500 focus:outline-none"
+            />
+          )}
           {rejecting ? (
             <form
               className="mt-3 flex flex-col gap-2"
@@ -131,7 +147,7 @@ function PaymentCard({ order, busy, onConfirm, onReject }) {
             <div className="mt-3 flex flex-wrap gap-3">
               <button
                 type="button"
-                onClick={() => onConfirm(order)}
+                onClick={() => onConfirm(order, txHash.trim())}
                 disabled={busy}
                 className="rounded-md bg-status-high px-5 py-2 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-60"
               >
@@ -189,13 +205,14 @@ export default function AdminPayments() {
     }
   }
 
-  function confirmPayment(order) {
+  function confirmPayment(order, txHash) {
     const ok = window.confirm(
-      `Confirm ${order.amount_crypto} ${order.coin_symbol} from ${order.customer_email}?\n\n` +
-        "Only confirm after checking on the explorer that the transaction sent at least this " +
-        `amount to ${order.pay_address}. This activates their ${order.plan_name} plan.`,
+      `Confirm ${order.amount_crypto} ${order.coin_symbol} from ${order.customer_email} ` +
+        `(${order.reference})?\n\n` +
+        "Only confirm after checking on the explorer that at least this amount arrived at " +
+        `${order.pay_address}. This activates their ${order.plan_name} plan.`,
     );
-    if (ok) review(order, () => api.confirmPayment(order.id));
+    if (ok) review(order, () => api.confirmPayment(order.id, { txHash }));
   }
 
   function rejectPayment(order, note) {

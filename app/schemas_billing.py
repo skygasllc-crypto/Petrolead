@@ -63,13 +63,17 @@ class CreateOrderRequestSchema(BaseModel):
 
 
 class MarkOrderPaidRequestSchema(BaseModel):
-    """Body for POST /api/billing/orders/{order_id}/paid — the customer's "I have paid"."""
+    """Body for POST /api/billing/orders/{order_id}/paid — the customer's
+    "I have paid". The transaction ID is optional; orders are identified by
+    their own reference code."""
 
-    tx_hash: str = Field(min_length=1, max_length=100)
+    tx_hash: str | None = Field(default=None, max_length=100)
 
 
 class ConfirmPaymentRequestSchema(BaseModel):
     note: str | None = Field(default=None, max_length=500)
+    # Optionally record the transaction the admin found while checking.
+    tx_hash: str | None = Field(default=None, max_length=100)
 
 
 class RejectPaymentRequestSchema(BaseModel):
@@ -88,6 +92,7 @@ class RejectPaymentRequestSchema(BaseModel):
 
 class PaymentOrderSchema(BaseModel):
     id: str
+    reference: str
     plan: str
     plan_name: str
     credits_per_month: int

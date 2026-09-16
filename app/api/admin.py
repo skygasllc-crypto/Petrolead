@@ -154,9 +154,12 @@ def confirm_payment(
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin_user),
 ) -> dict:
-    """Confirm a payment after checking the transaction on the block explorer.
-    Starts, renews or changes the customer's plan straight away."""
-    order = payment_service.confirm_order(db, order_id, admin=current_admin, note=payload.note)
+    """Confirm a payment after checking the receiving address on the block
+    explorer. Starts, renews or changes the customer's plan straight away;
+    an optional `tx_hash` records the transaction you matched."""
+    order = payment_service.confirm_order(
+        db, order_id, admin=current_admin, note=payload.note, tx_hash=payload.tx_hash
+    )
     return payment_service.serialize_order(order, include_customer=True)
 
 

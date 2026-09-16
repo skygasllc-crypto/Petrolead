@@ -183,10 +183,11 @@ export const api = {
 
   getOrder: (orderId) => request(`/billing/orders/${orderId}`),
 
+  // The transaction ID is optional — "I have paid" works without it.
   markOrderPaid: (orderId, txHash) =>
     request(`/billing/orders/${orderId}/paid`, {
       method: "POST",
-      body: JSON.stringify({ tx_hash: txHash }),
+      body: JSON.stringify({ tx_hash: txHash || undefined }),
     }),
 
   cancelOrder: (orderId) => request(`/billing/orders/${orderId}/cancel`, { method: "POST" }),
@@ -195,10 +196,10 @@ export const api = {
 
   adminPendingPaymentsCount: () => request("/admin/payments/pending-count"),
 
-  confirmPayment: (orderId, note) =>
+  confirmPayment: (orderId, { note, txHash } = {}) =>
     request(`/admin/payments/${orderId}/confirm`, {
       method: "POST",
-      body: JSON.stringify({ note: note || undefined }),
+      body: JSON.stringify({ note: note || undefined, tx_hash: txHash || undefined }),
     }),
 
   rejectPayment: (orderId, note) =>

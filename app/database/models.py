@@ -121,6 +121,11 @@ class PaymentOrder(Base):
         nullable=False,
     )
 
+    # Short code generated for the customer (e.g. PL-7K3D9A2M). It identifies
+    # the order in the app — BTC and TRC-20 transfers carry no memo, so it
+    # never travels with the coins.
+    reference: Mapped[str] = mapped_column(String(20), unique=True, index=True, nullable=False)
+
     plan: Mapped[str] = mapped_column(String(50), nullable=False)
     credits_per_month: Mapped[int] = mapped_column(Integer, nullable=False)
     billing_period: Mapped[str] = mapped_column(String(10), nullable=False)  # monthly | yearly
@@ -134,6 +139,8 @@ class PaymentOrder(Base):
     usd_rate: Mapped[str | None] = mapped_column(String(40))
 
     status: Mapped[str] = mapped_column(String(20), index=True, nullable=False)
+    # Optional: the customer can add the blockchain transaction ID, or an
+    # admin can record the one they found while checking the payment.
     tx_hash: Mapped[str | None] = mapped_column(String(100), unique=True)
     admin_note: Mapped[str | None] = mapped_column(String(500))
 

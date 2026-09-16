@@ -55,6 +55,7 @@ function PaymentHistory() {
           <thead className="text-xs uppercase tracking-wide text-ink-700">
             <tr className="border-b border-base-700">
               <th className="py-2 pr-4 font-medium">Date</th>
+              <th className="py-2 pr-4 font-medium">Reference</th>
               <th className="py-2 pr-4 font-medium">Plan</th>
               <th className="py-2 pr-4 font-medium">Amount</th>
               <th className="py-2 pr-4 font-medium">Status</th>
@@ -65,6 +66,7 @@ function PaymentHistory() {
             {orders.map((order) => (
               <tr key={order.id} className="border-b border-base-700 last:border-0">
                 <td className="py-3 pr-4 text-ink-500">{formatDate(order.created_at)}</td>
+                <td className="py-3 pr-4 font-mono text-xs text-ink-500">{order.reference}</td>
                 <td className="py-3 pr-4 text-ink-100">
                   {order.plan_name} · {order.billing_period === "yearly" ? "12 months" : "1 month"}
                 </td>

@@ -4,11 +4,13 @@
    paying in BTC, USDT (TRC-20) or TRX. The order records the business's
    receiving address (from settings) and the exact amount to send — BTC and
    TRX amounts come from a live price quote held for `CRYPTO_QUOTE_MINUTES`.
-2. The customer sends the coins, then marks the order paid with the
-   transaction ID. Admins are notified.
-3. An admin checks the transaction on a block explorer and confirms it —
-   which starts, renews or changes the customer's plan — or rejects it with
-   a note the customer can see.
+2. The customer sends the coins and clicks "I have paid" — nothing to type.
+   Each order carries a reference code the app generates (BTC and TRC-20
+   transfers have no memo field, so it identifies the order here, not on the
+   blockchain). A transaction ID is optional, from either side.
+3. An admin checks the receiving address on a block explorer — matching the
+   amount and time — and confirms the payment, which starts, renews or
+   changes the customer's plan, or rejects it with a note the customer sees.
 
 No payment processor, wallet software or private keys are involved: the app
 only ever shows public receiving addresses.
@@ -18,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import re
+import secrets
 from dataclasses import dataclass
 from datetime import timedelta
 from decimal import ROUND_UP, Decimal
@@ -47,6 +50,22 @@ USDT_ORDER_MINUTES = 24 * 60
 
 # Bitcoin and TRON transaction IDs are both 64 hexadecimal characters.
 TX_HASH_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+
+# Reference codes skip look-alike characters (no O/0, I/1) so they're easy to
+# read out over the phone or in an email.
+REFERENCE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def _new_reference(db: Session) -> str:
+    """A short code identifying this order, e.g. PL-7K3D9A2M."""
+    for _ in range(5):
+        reference = "PL-" + "".join(secrets.choice(REFERENCE_ALPHABET) for _ in range(8))
+        taken = db.execute(
+            select(PaymentOrder.id).where(PaymentOrder.reference == reference)
+        ).first()
+        if not taken:
+            return reference
+    raise PaymentError("Couldn't start this payment. Please try again.", 503)
 
 
 @dataclass(frozen=True)
@@ -120,6 +139,7 @@ def serialize_order(order: PaymentOrder, *, include_customer: bool = False) -> d
     plan = PLANS.get(order.plan)
     data = {
         "id": order.id,
+        "reference": order.reference,
         "plan": order.plan,
         "plan_name": plan.name if plan else order.plan,
         "credits_per_month": order.credits_per_month,
@@ -191,6 +211,7 @@ async def create_order(
 
     order = PaymentOrder(
         user_id=user.id,
+        reference=_new_reference(db),
         plan=plan.id,
         credits_per_month=credits_per_month,
         billing_period=billing_period,
@@ -208,7 +229,7 @@ async def create_order(
     db.refresh(order)
     logger.info(
         "Payment order %s created: user=%s plan=%s/%d %s %s %s",
-        order.id,
+        order.reference,
         user.id,
         plan.id,
         credits_per_month,
@@ -247,26 +268,36 @@ def list_user_orders(db: Session, user: User) -> list[PaymentOrder]:
     return list(db.execute(stmt).scalars().all())
 
 
-def submit_order(db: Session, user: User, order_id: str, tx_hash: str) -> PaymentOrder:
-    """The customer's "I have paid". An expired quote can still be marked paid —
-    the coins may already be on their way — and the admin sees that it expired."""
-    order = get_user_order(db, user, order_id)
-    if order.status not in (AWAITING_PAYMENT, EXPIRED):
-        raise PaymentError("This order has already been marked as paid or closed.", 409)
-
+def _clean_tx_hash(db: Session, order: PaymentOrder, tx_hash: str) -> str:
+    """Check an optional transaction ID: right shape, and not already claimed."""
     tx_hash = tx_hash.strip().lower()
     if not TX_HASH_RE.match(tx_hash):
         raise PaymentError(
             "That doesn't look like a transaction ID. It's a 64-character code shown in your "
-            "wallet or exchange once the payment is sent."
+            "wallet or exchange once the payment is sent — or leave it out."
         )
     already_used = db.execute(
         select(PaymentOrder.id).where(PaymentOrder.tx_hash == tx_hash, PaymentOrder.id != order.id)
     ).first()
     if already_used:
         raise PaymentError("This transaction ID has already been used for another order.", 409)
+    return tx_hash
 
-    order.tx_hash = tx_hash
+
+def submit_order(
+    db: Session, user: User, order_id: str, tx_hash: str | None = None
+) -> PaymentOrder:
+    """The customer's "I have paid" — nothing to type. A transaction ID is
+    optional and only helps an admin find the payment faster.
+
+    An expired quote can still be marked paid — the coins may already be on
+    their way — and the admin sees that it expired."""
+    order = get_user_order(db, user, order_id)
+    if order.status not in (AWAITING_PAYMENT, EXPIRED):
+        raise PaymentError("This order has already been marked as paid or closed.", 409)
+
+    if tx_hash and tx_hash.strip():
+        order.tx_hash = _clean_tx_hash(db, order, tx_hash)
     order.status = SUBMITTED
     order.submitted_at = utcnow()
     try:
@@ -277,7 +308,7 @@ def submit_order(db: Session, user: User, order_id: str, tx_hash: str) -> Paymen
             "This transaction ID has already been used for another order.", 409
         ) from exc
     db.refresh(order)
-    logger.info("Payment order %s marked paid by user %s", order.id, user.id)
+    logger.info("Payment order %s marked paid by user %s", order.reference, user.id)
     return order
 
 
@@ -314,9 +345,14 @@ def _order_to_review(db: Session, order_id: str) -> PaymentOrder:
     return order
 
 
-def confirm_order(db: Session, order_id: str, *, admin: User, note: str | None) -> PaymentOrder:
-    """Confirm a checked payment: start, renew or change the customer's plan."""
+def confirm_order(
+    db: Session, order_id: str, *, admin: User, note: str | None, tx_hash: str | None = None
+) -> PaymentOrder:
+    """Confirm a checked payment: start, renew or change the customer's plan.
+    An admin can record the transaction ID they found while checking."""
     order = _order_to_review(db, order_id)
+    if tx_hash and tx_hash.strip():
+        order.tx_hash = _clean_tx_hash(db, order, tx_hash)
     customer = db.get(User, order.user_id)
     billing_service.activate_paid_plan(
         db,
@@ -324,7 +360,7 @@ def confirm_order(db: Session, order_id: str, *, admin: User, note: str | None) 
         plan_id=order.plan,
         credits_per_month=order.credits_per_month,
         months=BILLING_PERIOD_MONTHS[order.billing_period],
-        detail=f"Crypto payment {order.id} confirmed by {admin.email}",
+        detail=f"Crypto payment {order.reference} confirmed by {admin.email}",
     )
     order.status = CONFIRMED
     order.reviewed_at = utcnow()
@@ -332,7 +368,7 @@ def confirm_order(db: Session, order_id: str, *, admin: User, note: str | None) 
     order.admin_note = note
     db.commit()
     db.refresh(order)
-    logger.info("Admin %s confirmed payment order %s", admin.id, order.id)
+    logger.info("Admin %s confirmed payment order %s", admin.id, order.reference)
     return order
 
 
@@ -344,5 +380,5 @@ def reject_order(db: Session, order_id: str, *, admin: User, note: str) -> Payme
     order.admin_note = note
     db.commit()
     db.refresh(order)
-    logger.info("Admin %s rejected payment order %s", admin.id, order.id)
+    logger.info("Admin %s rejected payment order %s", admin.id, order.reference)
     return order

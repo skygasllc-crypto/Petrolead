@@ -73,7 +73,8 @@ def mark_order_paid(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict:
-    """"I have paid": record the transaction ID and notify admins to check it."""
+    """"I have paid": mark the order as sent and notify admins to check it.
+    The transaction ID in the body is optional."""
     order = payment_service.submit_order(db, current_user, order_id, payload.tx_hash)
     background_tasks.add_task(
         notifications.notify_payment_submitted,

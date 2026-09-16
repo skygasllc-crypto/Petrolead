@@ -104,17 +104,19 @@ def _order(
     )
 
 
-def _paid(api, headers, order_id, tx=TX_A):
-    return api.post(f"/api/billing/orders/{order_id}/paid", json={"tx_hash": tx}, headers=headers)
+def _paid(api, headers, order_id, tx=None):
+    """"I have paid" — the transaction ID is optional."""
+    body = {"tx_hash": tx} if tx else {}
+    return api.post(f"/api/billing/orders/{order_id}/paid", json=body, headers=headers)
 
 
-def _confirm(api, admin, order_id):
-    response = api.post(f"/api/admin/payments/{order_id}/confirm", json={}, headers=admin)
+def _confirm(api, admin, order_id, **body):
+    response = api.post(f"/api/admin/payments/{order_id}/confirm", json=body, headers=admin)
     assert response.status_code == 200, response.text
     return response.json()
 
 
-def _paid_order(api, headers, tx=TX_A, **order_fields):
+def _paid_order(api, headers, tx=None, **order_fields):
     order = _order(api, headers, **order_fields).json()
     assert _paid(api, headers, order["id"], tx).status_code == 200
     return order
@@ -154,6 +156,12 @@ class TestCreatingOrders:
         assert order["pay_address"] == USDT_ADDRESS
         assert order["network"] == "TRON (TRC-20)"
         assert order["status"] == "awaiting_payment"
+        assert order["reference"].startswith("PL-")
+
+    def test_every_order_gets_its_own_reference(self, api, customer):
+        first = _order(api, customer[1]).json()["reference"]
+        second = _order(api, customer[1]).json()["reference"]
+        assert first != second
 
     def test_btc_amount_uses_the_live_price_and_rounds_up(self, api, customer):
         order = _order(api, customer[1], "basic", 1000, "monthly", currency="BTC")
@@ -185,21 +193,26 @@ class TestCreatingOrders:
 
 
 class TestMarkingPaid:
-    def test_i_have_paid_records_the_transaction_and_notifies_admins(
-        self, api, admin, customer, notified
-    ):
+    def test_i_have_paid_takes_nothing_and_notifies_admins(self, api, admin, customer, notified):
         order = _order(api, customer[1]).json()
-        response = _paid(api, customer[1], order["id"], TX_A.upper())
+        response = _paid(api, customer[1], order["id"])
         assert response.status_code == 200, response.text
         body = response.json()
         assert body["status"] == "submitted"
-        assert body["tx_hash"] == TX_A
-        assert body["explorer_url"] == f"https://tronscan.org/#/transaction/{TX_A}"
+        assert body["tx_hash"] is None
+        assert body["reference"] == order["reference"]
 
         assert len(notified) == 1
         summary, recipients = notified[0]
         assert summary["customer_email"] == "customer@example.com"
+        assert summary["reference"] == order["reference"]
         assert ADMIN_EMAIL in recipients
+
+    def test_an_optional_transaction_id_is_kept(self, api, customer):
+        order = _order(api, customer[1]).json()
+        body = _paid(api, customer[1], order["id"], TX_A.upper()).json()
+        assert body["tx_hash"] == TX_A
+        assert body["explorer_url"] == f"https://tronscan.org/#/transaction/{TX_A}"
 
     def test_rejects_something_that_isnt_a_transaction_id(self, api, customer):
         order = _order(api, customer[1]).json()
@@ -208,7 +221,7 @@ class TestMarkingPaid:
         assert "64-character" in response.json()["detail"]
 
     def test_a_transaction_id_can_only_be_used_once(self, api, customer):
-        _paid_order(api, customer[1])
+        _paid_order(api, customer[1], TX_A)
         second = _order(api, customer[1]).json()
         response = _paid(api, customer[1], second["id"], TX_A)
         assert response.status_code == 409
@@ -247,7 +260,7 @@ class TestMarkingPaid:
 class TestAdminReview:
     def test_pending_payments_are_listed_and_counted(self, api, admin, customer):
         _order(api, customer[1])  # not marked paid, so not pending
-        order = _paid_order(api, customer[1], tx=TX_B)
+        order = _paid_order(api, customer[1])
 
         assert api.get("/api/admin/payments/pending-count", headers=admin).json() == {"count": 1}
         pending = api.get("/api/admin/payments?status=submitted", headers=admin).json()
@@ -301,6 +314,12 @@ class TestAdminReview:
         assert subscription.plan == "professional"
         assert subscription.credits_per_month == 5000
         assert subscription.credits_balance == 6000
+
+    def test_confirming_can_record_the_transaction_the_admin_found(self, api, admin, customer):
+        order = _paid_order(api, customer[1])
+        body = _confirm(api, admin, order["id"], tx_hash=TX_A)
+        assert body["tx_hash"] == TX_A
+        assert body["explorer_url"].endswith(TX_A)
 
     def test_only_payments_marked_paid_can_be_confirmed(self, api, admin, customer):
         order = _order(api, customer[1]).json()
@@ -367,6 +386,7 @@ class TestPaidPeriods:
 
 ORDER_SUMMARY = {
     "id": "order-1",
+    "reference": "PL-TESTCODE",
     "plan_name": "Professional",
     "billing_period": "yearly",
     "credits_per_month": 2000,
@@ -380,6 +400,25 @@ ORDER_SUMMARY = {
     "customer_email": "customer@example.com",
     "paid_after_quote_expired": False,
 }
+
+
+class _FakeSMTP:
+    """Stands in for smtplib.SMTP, collecting the messages "sent"."""
+
+    def __init__(self, sent):
+        self._sent = sent
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def starttls(self):
+        pass
+
+    def send_message(self, message):
+        self._sent.append(message)
 
 
 class TestAdminEmail:
@@ -409,8 +448,26 @@ class TestAdminEmail:
 
         assert len(sent) == 1
         assert sent[0]["To"] == ADMIN_EMAIL
-        assert sent[0]["Subject"].startswith("Payment to confirm: Professional")
+        assert sent[0]["Subject"].startswith("Payment to confirm PL-TESTCODE: Professional")
         assert TX_A in sent[0].get_content()
+
+    def test_says_when_there_is_no_transaction_id(self, monkeypatch):
+        settings = _settings(smtp_host="smtp.example.com", smtp_from="billing@petrolead.example")
+        monkeypatch.setattr(notifications, "get_settings", lambda: settings)
+        sent = []
+        monkeypatch.setattr(
+            notifications.smtplib,
+            "SMTP",
+            lambda *args, **kwargs: _FakeSMTP(sent),
+        )
+
+        notifications.notify_payment_submitted(
+            {**ORDER_SUMMARY, "tx_hash": None, "explorer_url": None}, [ADMIN_EMAIL]
+        )
+
+        body = sent[0].get_content()
+        assert "match the payment by amount and time" in body
+        assert "PL-TESTCODE" in body
 
     def test_without_smtp_nothing_is_sent(self, monkeypatch):
         def fail(*args, **kwargs):

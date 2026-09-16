@@ -44,25 +44,28 @@ def notify_payment_submitted(order: dict, recipients: list[str]) -> None:
 
     message = EmailMessage()
     message["Subject"] = (
-        f"Payment to confirm: {order['plan_name']} ({order['billing_period']}) — "
-        f"{order['amount_crypto']} {order['coin_symbol']}"
+        f"Payment to confirm {order['reference']}: {order['plan_name']} "
+        f"({order['billing_period']}) — {order['amount_crypto']} {order['coin_symbol']}"
     )
     message["From"] = settings.smtp_from
     message["To"] = ", ".join(recipients)
     lines = [
-        "A customer has marked a crypto payment as paid. Check the transaction on the "
+        "A customer has marked a crypto payment as paid. Check the receiving address on the "
         "block explorer, then confirm or reject it:",
         f"{settings.app_base_url.rstrip('/')}/admin/payments",
         "",
+        f"Reference: {order['reference']}",
         f"Customer: {order['customer_email']}",
         f"Plan: {order['plan_name']}, {order['credits_per_month']:,} credits/month, "
         f"billed {order['billing_period']}",
         f"Amount due: {order['amount_crypto']} {order['coin_symbol']} on {order['network']} "
         f"(${order['amount_usd']})",
         f"Receiving address: {order['pay_address']}",
-        f"Transaction ID: {order['tx_hash']}",
-        f"Explorer: {order['explorer_url']}",
     ]
+    if order.get("tx_hash"):
+        lines += [f"Transaction ID: {order['tx_hash']}", f"Explorer: {order['explorer_url']}"]
+    else:
+        lines.append("No transaction ID given — match the payment by amount and time.")
     if order.get("paid_after_quote_expired"):
         lines += [
             "",
