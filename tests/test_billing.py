@@ -18,6 +18,7 @@ from app.config import get_settings as real_get_settings
 from app.database.models import CreditTransaction, Subscription, utcnow
 from app.discovery import emails as emails_module
 from app.discovery import extractor as extractor_module
+from app.discovery.types import DiscoveredCompany
 from app.services import billing_service, company_service, saved_search_service
 from tests.test_url_lookup import _fake_fetch_page, _FakeRealProvider
 
@@ -98,6 +99,34 @@ def _fake_person_lookups(monkeypatch, emails_for=lambda full_name: True):
         return {"email": f"{slug}@{domain}", "is_valid": True}
 
     monkeypatch.setattr(company_service, "find_person_email", fake_find_person_email)
+
+
+def _fake_search_results(monkeypatch, *, with_emails: int, without_emails: int):
+    """Make a company search return results whose emails we control — the
+    mock provider never enriches candidates, so it finds none by itself.
+
+    Returns the list the fake source appends to on each call, so a test can
+    tell whether the search ran at all."""
+    companies = [
+        DiscoveredCompany(
+            company_name=f"Emailed Petroleum {i}",
+            website=f"https://emailed{i}.example",
+            emails=[{"email": f"info@emailed{i}.example", "is_valid": True}],
+        )
+        for i in range(with_emails)
+    ] + [
+        DiscoveredCompany(company_name=f"Quiet Petroleum {i}", website=f"https://quiet{i}.example")
+        for i in range(without_emails)
+    ]
+    calls = []
+
+    class FakeSource:
+        async def discover(self, request):
+            calls.append(request)
+            return list(companies)
+
+    monkeypatch.setattr(company_service, "SearchSource", FakeSource)
+    return calls
 
 
 def _subscription(db_session, user_id):
@@ -295,6 +324,57 @@ class TestEmailCredits:
         assert "needs up to 3 email credits, but you have 2" in response.json()["detail"]
 
 
+class TestSearchCredits:
+    """A company search costs one credit per result that carries an email."""
+
+    def test_each_result_with_an_email_spends_a_credit(self, api, admin, member, monkeypatch):
+        _assign(api, admin, member[0], "professional", 2000)
+        _fake_search_results(monkeypatch, with_emails=2, without_emails=1)
+
+        response = api.post("/api/discover", json={"limit": 10}, headers=member[1])
+        assert response.status_code == 200, response.text
+        assert len(response.json()["companies"]) == 3
+        assert _billing(api, member[1])["credits_balance"] == 1998
+
+    def test_results_without_an_email_are_free(self, api, admin, member, monkeypatch):
+        _assign(api, admin, member[0], "professional", 2000)
+        _fake_search_results(monkeypatch, with_emails=0, without_emails=3)
+
+        assert api.post("/api/discover", json={"limit": 10}, headers=member[1]).status_code == 200
+        assert _billing(api, member[1])["credits_balance"] == 2000
+
+    def test_the_spend_is_recorded_in_the_ledger(self, api, admin, member, monkeypatch, db_session):
+        _assign(api, admin, member[0], "professional", 2000)
+        _fake_search_results(monkeypatch, with_emails=2, without_emails=1)
+        api.post("/api/discover", json={"limit": 10}, headers=member[1])
+
+        entry = db_session.execute(
+            select(CreditTransaction).where(CreditTransaction.reason == "email_found")
+        ).scalar_one()
+        assert entry.delta == -2
+        assert entry.balance_after == 1998
+        assert "2 of 3 results with an email" in entry.detail
+
+    def test_a_search_needs_a_credit_before_it_runs(self, api, admin, member, monkeypatch):
+        _assign(api, admin, member[0], "professional", 2000)
+        _adjust(api, admin, member[0], -2000)
+        calls = _fake_search_results(monkeypatch, with_emails=2, without_emails=1)
+
+        response = api.post("/api/discover", json={"limit": 10}, headers=member[1])
+        assert response.status_code == 402
+        assert "out of email credits" in response.json()["detail"]
+        # The provider is never called, so an empty balance can't cost money.
+        assert calls == []
+
+    def test_a_search_spends_no_more_than_the_balance(self, api, admin, member, monkeypatch):
+        _assign(api, admin, member[0], "professional", 2000)
+        _adjust(api, admin, member[0], -1999)
+        _fake_search_results(monkeypatch, with_emails=3, without_emails=0)
+
+        assert api.post("/api/discover", json={"limit": 10}, headers=member[1]).status_code == 200
+        assert _billing(api, member[1])["credits_balance"] == 0
+
+
 class TestPlanLimits:
     def test_results_per_search_are_capped_by_plan(self, api, admin, member):
         _assign(api, admin, member[0], "basic", 1000)
@@ -406,3 +486,24 @@ class TestScheduledSearchLimits:
 
         ran = asyncio.run(saved_search_service.run_due_saved_searches(db_session))
         assert ran == 0
+
+    def test_a_scheduled_run_spends_its_owners_credits(
+        self, api, admin, member, db_session, monkeypatch
+    ):
+        _assign(api, admin, member[0], "professional", 2000)
+        assert self._schedule(api, member[1]).status_code == 200
+        _fake_search_results(monkeypatch, with_emails=2, without_emails=1)
+
+        assert asyncio.run(saved_search_service.run_due_saved_searches(db_session)) == 1
+        assert _billing(api, member[1])["credits_balance"] == 1998
+
+    def test_scheduled_runs_stop_when_the_owner_runs_out_of_credits(
+        self, api, admin, member, db_session, monkeypatch
+    ):
+        _assign(api, admin, member[0], "professional", 2000)
+        assert self._schedule(api, member[1]).status_code == 200
+        _adjust(api, admin, member[0], -2000)
+        calls = _fake_search_results(monkeypatch, with_emails=2, without_emails=1)
+
+        assert asyncio.run(saved_search_service.run_due_saved_searches(db_session)) == 0
+        assert calls == []

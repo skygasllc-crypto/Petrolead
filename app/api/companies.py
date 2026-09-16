@@ -165,7 +165,9 @@ async def discover_companies(
     saved to your Companies list until you explicitly save a result via
     `POST /companies/save` (or `/save-bulk` for several at once).
 
-    Counts against the plan's daily search allowance once it completes."""
+    Counts against the plan's daily search allowance once it completes, and
+    spends one email credit for every result that comes back with a business
+    email — results without one are free."""
     settings = get_settings()
     billing_service.check_discovery(db, current_user, payload.limit)
     try:
@@ -185,6 +187,13 @@ async def discover_companies(
         )
 
     billing_service.record_discovery(db, current_user)
+    emails_found = sum(1 for preview in previews if preview["emails"])
+    billing_service.spend_credits(
+        db,
+        current_user,
+        emails_found,
+        f"Search {search_query.id}: {emails_found} of {len(previews)} results with an email",
+    )
     return DiscoverResponseSchema(
         search_id=search_query.id,
         status=search_query.status.value,

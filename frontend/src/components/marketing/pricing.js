@@ -128,11 +128,11 @@ export const PRICING_FAQS = [
   },
   {
     q: "What are email credits?",
-    a: "One credit is used each time PetroLead finds a business email for you — from a LinkedIn profile link, a name and company, or a line in a bulk lookup.",
+    a: "One credit is used each time PetroLead finds a business email for you — from a LinkedIn profile link, a name and company, a line in a bulk lookup, or a company in your search results.",
   },
   {
     q: "When do I use credits?",
-    a: "Only when an email is found. A lookup that comes back without a business email doesn't use a credit.",
+    a: "Only when an email is found. A lookup — or a search result — that comes back without a business email doesn't use a credit, so you only pay for contacts you can actually use.",
   },
   {
     q: "Do unused credits roll over?",

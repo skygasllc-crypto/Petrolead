@@ -89,7 +89,8 @@ export default function Discover() {
       setError(err instanceof ApiError ? err.message : "Something went wrong.");
       setStatus("error");
     }
-    // A completed search counts against the plan's daily allowance.
+    // A completed search counts against the plan's daily allowance and
+    // spends a credit for every result that came with a business email.
     refreshBilling();
   }
 
@@ -352,6 +353,10 @@ export default function Discover() {
           >
             {status === "loading" ? "Searching..." : "Search Companies"}
           </button>
+          <p className="mt-2 text-xs text-ink-700">
+            Uses one email credit for each result that comes with a business email. Results
+            without one are free.
+          </p>
         </div>
       </form>
 

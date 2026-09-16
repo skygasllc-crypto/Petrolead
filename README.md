@@ -220,7 +220,7 @@ Copy `.env.example` to `.env` and fill in real values. **Never commit `.env`.**
 | `COINGECKO_API_KEY` | Optional free CoinGecko Demo key for steadier live BTC/TRX prices; the keyless API works without it. |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_USE_TLS` | Optional. When set, admins get an email for every payment waiting for confirmation. |
 | `APP_BASE_URL` | Where the web app is served, for links in those emails. |
-| `BILLING_ENFORCED` | Default `true`: every non-admin account needs a plan, spends one email credit per person lookup that finds an email, and is held to its plan's limits (see "Plans & credits" below). Admins are never limited. `false` switches all limits off. |
+| `BILLING_ENFORCED` | Default `true`: every non-admin account needs a plan, spends one email credit per business email found (a person lookup that finds one, or a company search result that comes with one), and is held to its plan's limits (see "Plans & credits" below). Admins are never limited. `false` switches all limits off. |
 | `SEARCH_PROVIDER` | `mock` \| `google_cse` \| `bing` \| `serpapi` \| `searchapi_io` \| `serper` |
 | `GOOGLE_CSE_API_KEY` / `GOOGLE_CSE_ENGINE_ID` | Required for `google_cse`. Get from [Programmable Search Engine](https://programmablesearchengine.google.com/). Note: Google requires a billing account linked to the project before the API will serve requests at all, even within the free 100/day quota. |
 | `BING_SEARCH_API_KEY` | Required for `bing`. Azure Cognitive Services Bing Search resource key — also requires a card on the Azure account. |
@@ -383,11 +383,13 @@ session store, so a token can't be revoked before it expires.
 account has no plan and can't use the lookup tools until an admin assigns
 one on the Users page — there's no online checkout yet. Plans and their
 limits are defined in `app/services/plans.py` (mirroring the public pricing
-page): one email credit is spent only when a person lookup (LinkedIn
-profile, name + company, or a bulk line) returns a business email; website
-extraction and the Email Verifier are free; each plan caps company
-discovery searches per day and results per search, and bulk lookup and
-CSV/Excel export need Professional or Enterprise. Credits are granted per
+page): one email credit is spent per business email found — for a person
+lookup (LinkedIn profile, name + company, or a bulk line) that returns one,
+and for each result of a company search that comes with one (scheduled runs
+included). Results without a business email are free, as are website
+extraction and the Email Verifier; each plan caps company discovery
+searches per day and results per search, and bulk lookup and CSV/Excel
+export need Professional or Enterprise. Credits are granted per
 monthly period and roll over — renewal happens the next time the account is
 used. Every change is recorded in the `credit_transactions` table. Admins
 are never limited. Scheduled searches are limited per plan too (none on

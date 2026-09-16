@@ -1,10 +1,12 @@
 """Plans, email credits and usage limits.
 
-One email credit is spent each time a person lookup — a LinkedIn profile
-link, a name + company, or a bulk-lookup line — actually returns a business
-email. Company-website extraction and the Email Verifier don't use credits:
-neither calls a paid data provider. Plan limits cap company discovery
-searches and gate bulk lookup and exports (see `app.services.plans`).
+One email credit is spent per business email found: for each person lookup
+— a LinkedIn profile link, a name + company, or a bulk-lookup line — that
+returns one, and for each company in a discovery search that comes back
+with one (scheduled searches included). Results without a business email
+are free, as are company-website extraction and the Email Verifier: neither
+calls a paid data provider. Plan limits also cap company discovery searches
+per day and gate bulk lookup and exports (see `app.services.plans`).
 
 Enforcement is switched on by `BILLING_ENFORCED`; admins are never limited.
 Every check raises `BillingError`, which `app.main` turns into an HTTP
@@ -128,6 +130,24 @@ def require_feature(db: Session, user: User, feature: str, label: str) -> None:
         )
 
 
+def _no_credits_error(subscription: Subscription) -> BillingError:
+    """The same message wherever an empty balance stops a request."""
+    return BillingError(
+        "You're out of email credits. They renew on "
+        f"{_format_date(subscription.renews_at)}, or upgrade your plan for more.",
+        402,
+    )
+
+
+def has_credits(db: Session, user: User) -> bool:
+    """Whether the user has at least one credit left. Checked before an
+    unattended run so it can't spend provider calls nobody can pay for."""
+    if is_exempt(user):
+        return True
+    subscription = get_subscription(db, user)
+    return subscription is not None and subscription.credits_balance > 0
+
+
 def require_credits(db: Session, user: User, needed: int = 1) -> None:
     """Raise unless the user has at least `needed` credits — checked before a
     lookup runs, so nobody spends provider calls they can't pay for."""
@@ -139,11 +159,7 @@ def require_credits(db: Session, user: User, needed: int = 1) -> None:
     if balance >= needed:
         return
     if balance == 0:
-        raise BillingError(
-            "You're out of email credits. They renew on "
-            f"{_format_date(subscription.renews_at)}, or upgrade your plan for more.",
-            402,
-        )
+        raise _no_credits_error(subscription)
     raise BillingError(
         f"This lookup needs up to {needed} email credits, but you have {balance}. Look up "
         "fewer people at once, or upgrade your plan for more.",
@@ -198,6 +214,10 @@ def check_discovery(db: Session, user: User, requested_results: int) -> None:
             f"the {plan.name} plan today. They reset at midnight UTC, or upgrade for more.",
             429,
         )
+    # Results that carry a business email cost a credit each, so an empty
+    # balance stops the search before it spends any provider calls.
+    if subscription.credits_balance <= 0:
+        raise _no_credits_error(subscription)
 
 
 def check_saved_search_quota(db: Session, user: User, existing: int) -> None:

@@ -123,6 +123,19 @@ async def run_saved_search(db: Session, saved: SavedSearch) -> None:
         saved.frequency, timedelta(days=1)
     )
     db.commit()
+
+    # An unattended run saves its results straight through, so it spends the
+    # owner's credits the same way an interactive search does.
+    owner = db.get(User, saved.owner_id)
+    emails_found = getattr(search_query, "emails_found", 0)
+    if owner is not None and emails_found:
+        billing_service.spend_credits(
+            db,
+            owner,
+            emails_found,
+            f"Scheduled search {saved.name!r}: {emails_found} result(s) with an email",
+        )
+
     logger.info(
         "Saved search %s (%r) ran: search_id=%s next_run_at=%s",
         saved.id,
@@ -135,9 +148,10 @@ async def run_saved_search(db: Session, saved: SavedSearch) -> None:
 async def run_due_saved_searches(db: Session, owner_id: str | None = None) -> int:
     """Run every due saved search (or just `owner_id`'s). Returns the count run.
 
-    A search is skipped — and stays due — while its owner is blocked or no
-    longer has a plan that includes scheduled searches, so a lapsed plan
-    doesn't keep spending search-provider calls."""
+    A search is skipped — and stays due — while its owner is blocked, no
+    longer has a plan that includes scheduled searches, or has no email
+    credits left, so neither a lapsed plan nor an empty balance keeps
+    spending search-provider calls."""
     ran = 0
     for saved in due_saved_searches(db, owner_id):
         owner = db.get(User, saved.owner_id)
@@ -147,6 +161,9 @@ async def run_due_saved_searches(db: Session, owner_id: str | None = None) -> in
             logger.info(
                 "Skipping scheduled search %s: its owner's plan doesn't include them", saved.id
             )
+            continue
+        if not billing_service.has_credits(db, owner):
+            logger.info("Skipping scheduled search %s: its owner has no credits left", saved.id)
             continue
         try:
             await run_saved_search(db, saved)

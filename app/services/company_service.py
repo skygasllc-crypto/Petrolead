@@ -551,6 +551,7 @@ async def run_discovery(db: Session, payload: DiscoverRequestSchema, owner_id: s
 
     candidates = await _execute_sources(db, search_query, payload)
     if candidates is None:
+        search_query.emails_found = 0
         return search_query
 
     logger.info(
@@ -584,9 +585,12 @@ async def run_discovery(db: Session, payload: DiscoverRequestSchema, owner_id: s
     db.commit()
     db.refresh(search_query)
 
-    # Transient (non-mapped) attribute so the API layer can render the
-    # companies produced by this job without a dedicated join table.
+    # Transient (non-mapped) attributes for the caller: the companies this
+    # job produced (rendered by the API without a dedicated join table), and
+    # how many came with a business email — what the run costs its owner in
+    # credits (see `saved_search_service.run_saved_search`).
     search_query.result_companies = result_companies
+    search_query.emails_found = sum(1 for candidate in candidates if candidate.emails)
     logger.info(
         "Search %s completed: new=%d duplicates=%d total=%d",
         search_query.id,
