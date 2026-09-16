@@ -44,3 +44,6 @@ Thumbs.db
 
 # Docker
 docker-compose.override.yml
+
+# Generated QR images for the crypto receiving addresses
+wallet-qr/
