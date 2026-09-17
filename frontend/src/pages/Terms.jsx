@@ -13,14 +13,14 @@ export default function Terms() {
   return (
     <LegalPage
       title="Terms of Service"
-      updated={<Fill>DATE</Fill>}
+      updated={<Fill>20 October, 2026</Fill>}
       intro="These terms govern your use of PetroLead. By creating an account you agree to them."
     >
       <Section title="1. Who we are">
         <p>
-          PetroLead (&quot;we&quot;, &quot;us&quot;) is operated by <Fill>LEGAL ENTITY NAME</Fill>,
-          registered in <Fill>COUNTRY</Fill>
-          {" "}under company number <Fill>NUMBER</Fill>, at <Fill>REGISTERED ADDRESS</Fill>. You can
+          PetroLead (&quot;we&quot;, &quot;us&quot;) is operated by <Fill>PETROL INVETSMENT</Fill>,
+          registered in <Fill>Switzerland</Fill>
+          {" "}under company number <Fill>Sw-00896</Fill>. You can
           reach us at <a className="text-brand-600 hover:underline" href={`mailto:${SALES_EMAIL}`}>{SALES_EMAIL}</a>.
         </p>
       </Section>
