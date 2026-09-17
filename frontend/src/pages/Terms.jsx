@@ -18,7 +18,7 @@ export default function Terms() {
     >
       <Section title="1. Who we are">
         <p>
-          PetroLead (&quot;we&quot;, &quot;us&quot;) is operated by <Fill>PETROL INVEsTMENT</Fill>,
+          PetroLead (&quot;we&quot;, &quot;us&quot;) is operated by <Fill>PETROL INVESTMENT</Fill>,
           registered in <Fill>Switzerland</Fill>
           {" "}under company number <Fill>Sw-00896</Fill>. You can
           reach us at <a className="text-brand-600 hover:underline" href={`mailto:${SALES_EMAIL}`}>{SALES_EMAIL}</a>.
