@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.core.deps import get_current_user
 from app.database.connection import get_db
 from app.database.models import User
@@ -61,18 +62,25 @@ async def verify_emails(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> VerifyEmailsResponseSchema:
-    """Email Verifier: check each address's format, then whether its domain
-    has mail (MX) records. Nothing is saved and no mailbox is ever
-    contacted — `valid` means the domain can receive mail, not that the
-    specific mailbox exists. Included in every plan; doesn't use credits."""
+    """Email Verifier: grade each address as deliverable, undeliverable,
+    risky or unknown, so undeliverable ones can be dropped before sending.
+
+    Nothing is saved. Syntax, disposable domains and obvious typos are
+    decided locally; whether a mailbox actually exists depends on
+    `EMAIL_VERIFY_PROVIDER` — with the default (`mx`) only the domain is
+    checked, so well-formed addresses come back `risky`, never
+    `deliverable`. Included in every plan; doesn't use credits.
+    """
     billing_service.require_plan(db, current_user)
     results = await verify_email_addresses(payload.emails)
     counts = Counter(result["status"] for result in results)
     return VerifyEmailsResponseSchema(
         results=results,
-        valid_count=counts["valid"],
-        invalid_count=counts["invalid_format"] + counts["no_mail_server"],
+        deliverable_count=counts["deliverable"],
+        undeliverable_count=counts["undeliverable"],
+        risky_count=counts["risky"],
         unknown_count=counts["unknown"],
+        mailbox_checks_available=get_settings().email_verify_provider != "mx",
     )
 
 

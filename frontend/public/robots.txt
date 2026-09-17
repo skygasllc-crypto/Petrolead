@@ -1,0 +1,28 @@
+# https://petrolead.org
+#
+# The marketing pages are meant to be found. Everything behind a login is
+# not: crawling it only ever reaches a redirect, and having sign-in or admin
+# URLs in search results helps nobody. The pages themselves also carry a
+# noindex tag (see src/components/Seo.jsx), which is what actually keeps
+# them out of the index — this file only asks crawlers not to fetch them.
+
+User-agent: *
+
+Disallow: /login
+Disallow: /register
+Disallow: /admin
+Disallow: /dashboard
+Disallow: /discover
+Disallow: /email-finder
+Disallow: /verify-emails
+Disallow: /companies
+Disallow: /emails
+Disallow: /searches
+Disallow: /scheduled
+Disallow: /billing
+Disallow: /checkout
+Disallow: /settings
+
+Allow: /
+
+Sitemap: https://petrolead.org/sitemap.xml

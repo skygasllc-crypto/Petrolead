@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import select
 
 from app.api.admin import router as admin_router
 from app.api.auth import router as auth_router
@@ -19,7 +20,10 @@ from app.api.saved_searches import router as saved_searches_router
 from app.config import get_settings
 from app.core.deps import get_current_admin_user, get_current_user
 from app.core.logging import setup_logging
+from app.core.middleware import RateLimitMiddleware, SecurityHeadersMiddleware
+from app.database.connection import SessionLocal
 from app.database.migrations import run_migrations
+from app.database.models import User
 from app.services.billing_service import BillingError
 from app.services.payment_service import PaymentError
 
@@ -27,6 +31,37 @@ setup_logging()
 logger = logging.getLogger("petrolead.main")
 
 settings = get_settings()
+
+
+def _warn_about_unclaimed_admin_addresses() -> None:
+    """Admin rights go to whoever registers an address in ADMIN_EMAILS — the
+    app can't tell the owner of an address from someone who merely typed it.
+    Until each one has an account, that account is there for the taking, so
+    say so loudly at every startup rather than leaving it silent."""
+    listed = settings.admin_emails_list
+    if not listed:
+        return
+    try:
+        db = SessionLocal()
+        try:
+            registered = {
+                email.lower()
+                for email in db.execute(select(User.email).where(User.email.in_(listed))).scalars()
+            }
+        finally:
+            db.close()
+    except Exception:  # noqa: BLE001 — a warning must never stop the app booting
+        logger.exception("Could not check whether the ADMIN_EMAILS addresses are registered")
+        return
+
+    unclaimed = [email for email in listed if email not in registered]
+    if unclaimed:
+        logger.warning(
+            "ADMIN_EMAILS lists %d address(es) with no account yet (%s). Whoever registers one "
+            "first becomes an admin — register them now.",
+            len(unclaimed),
+            ", ".join(unclaimed),
+        )
 
 
 @asynccontextmanager
@@ -44,6 +79,7 @@ async def lifespan(app: FastAPI):
     )
     # A default SECRET_KEY outside development doesn't get this far: the
     # settings refuse to load at all (see `app.config`).
+    _warn_about_unclaimed_admin_addresses()
     yield
     logger.info("PetroLead shutting down")
 
@@ -53,8 +89,19 @@ app = FastAPI(
     description="Petroleum & energy B2B lead discovery platform — Phase 1: Company Discovery.",
     version="0.1.0",
     lifespan=lifespan,
+    # Outside development these are all None, which removes the routes
+    # entirely rather than just hiding the link.
+    docs_url="/docs" if settings.serve_docs else None,
+    redoc_url="/redoc" if settings.serve_docs else None,
+    openapi_url="/openapi.json" if settings.serve_docs else None,
 )
 
+# Middleware order matters: Starlette runs the LAST one added first, so CORS
+# is added last and ends up outermost. That way a 429 from the rate limiter
+# still carries CORS headers and the browser can read the error, instead of
+# showing an opaque network failure.
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RateLimitMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,

@@ -74,6 +74,24 @@ def update_user_status(
     return user
 
 
+@router.post("/users/{user_id}/revoke-sessions", response_model=AdminUserSchema)
+def revoke_user_sessions(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin_user),
+) -> User:
+    """End every session for an account without blocking it — for when a
+    token may have been stolen but the customer has done nothing wrong.
+    Their next request fails and they simply log in again; blocking, by
+    contrast, locks them out until an admin unblocks them."""
+    user = _get_user_or_404(db, user_id)
+    user.token_version += 1
+    db.commit()
+    db.refresh(user)
+    logger.info("Admin %s ended every session for user %s", current_admin.id, user.id)
+    return user
+
+
 @router.put("/users/{user_id}/subscription", response_model=AdminUserSchema)
 def set_user_plan(
     user_id: str,

@@ -7,7 +7,7 @@
 export const YEARLY_DISCOUNT = 0.25;
 
 // TODO: replace with a real, monitored sales address before launch.
-export const SALES_EMAIL = "sales@petrolead.example";
+export const SALES_EMAIL = "sales@petrolead.org";
 
 export const PLANS = [
   {
@@ -99,7 +99,7 @@ export const COMPARISON = [
       { label: "LinkedIn Email Finder", values: [true, true, true] },
       { label: "Name + company lookup", values: [true, true, true] },
       { label: "Email Extractor (company websites)", values: [true, true, true] },
-      { label: "Email Verifier (up to 50 per check)", values: [true, true, true] },
+      { label: "Email Verifier (up to 500 per check)", values: [true, true, true] },
       { label: "Email validity labels", values: [true, true, true] },
       { label: "Lead scoring", values: [true, true, true] },
     ],

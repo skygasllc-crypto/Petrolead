@@ -129,6 +129,21 @@ export default function AdminUsers() {
     );
   }
 
+  function revokeSessions(targetUser) {
+    const confirmed = window.confirm(
+      `End every session for ${targetUser.email}?\n\n` +
+        "Anyone signed in as them is signed out immediately and has to log in again. " +
+        "Use this if their login may have been stolen — it does not block the account, " +
+        "so they can get straight back in with their password.",
+    );
+    if (!confirmed) return;
+    return runUpdate(
+      targetUser,
+      () => api.adminRevokeSessions(targetUser.id),
+      "Could not end this user's sessions.",
+    );
+  }
+
   function changePlan(targetUser, value) {
     if (value === "") {
       const confirmed = window.confirm(
@@ -265,18 +280,29 @@ export default function AdminUsers() {
                       {isSelf ? (
                         <span className="text-xs text-ink-700">This is you</span>
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() => toggleActive(u)}
-                          disabled={busy}
-                          className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
-                            u.is_active
-                              ? "border-status-danger/50 text-status-danger hover:bg-status-danger/10"
-                              : "border-status-high/50 text-status-high hover:bg-status-high/10"
-                          }`}
-                        >
-                          {busy ? "Working..." : u.is_active ? "Block" : "Unblock"}
-                        </button>
+                        <div className="flex flex-wrap justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => revokeSessions(u)}
+                            disabled={busy}
+                            title="Sign them out everywhere without blocking the account"
+                            className="rounded-md border border-base-600 px-3 py-1.5 text-xs font-semibold text-ink-300 transition-colors hover:border-brand-500 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {busy ? "Working..." : "End sessions"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => toggleActive(u)}
+                            disabled={busy}
+                            className={`rounded-md border px-3 py-1.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                              u.is_active
+                                ? "border-status-danger/50 text-status-danger hover:bg-status-danger/10"
+                                : "border-status-high/50 text-status-high hover:bg-status-high/10"
+                            }`}
+                          >
+                            {busy ? "Working..." : u.is_active ? "Block" : "Unblock"}
+                          </button>
+                        </div>
                       )}
                     </td>
                   </tr>

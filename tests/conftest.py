@@ -29,6 +29,10 @@ os.environ["BILLING_ENFORCED"] = "false"
 # database (the `db_session` fixture below); migrations have their own
 # tests in tests/test_migrations.py.
 os.environ["RUN_MIGRATIONS_ON_STARTUP"] = "false"
+# The suite makes far more than 60 requests a minute from one address, which
+# is exactly what the limiter is meant to stop. Tests that are about rate
+# limiting turn it back on themselves (see tests/test_hardening.py).
+os.environ["RATE_LIMIT_ENABLED"] = "false"
 
 import pytest
 from sqlalchemy import create_engine

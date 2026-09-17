@@ -2,7 +2,12 @@ import { useMemo, useState } from "react";
 import { api, ApiError } from "../api/client";
 import EmailCheckBadge from "../components/EmailCheckBadge";
 import Icon from "../components/marketing/Icon";
-import { EMAIL_CHECK_STATUS, MAX_VERIFY_EMAILS } from "../lib/emailChecks";
+import {
+  EMAIL_CHECK_REASON,
+  EMAIL_CHECK_STATUS,
+  MAX_VERIFY_EMAILS,
+  SAFE_TO_SEND,
+} from "../lib/emailChecks";
 
 function parseEmails(text) {
   return text
@@ -45,7 +50,11 @@ export default function EmailVerifier() {
     }
   }
 
-  const validEmails = response ? response.results.filter((r) => r.status === "valid") : [];
+  // Only addresses confirmed deliverable are worth copying out — the point
+  // of verifying is to leave the rest behind.
+  const validEmails = response
+    ? response.results.filter((r) => r.status === SAFE_TO_SEND)
+    : [];
 
   async function handleCopyValid() {
     try {
@@ -111,11 +120,26 @@ export default function EmailVerifier() {
 
       {status === "done" && response && (
         <div className="flex flex-col gap-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <SummaryTile label="Domain accepts mail" value={response.valid_count} tone="text-status-high" />
-            <SummaryTile label="Invalid or no mail server" value={response.invalid_count} tone="text-status-danger" />
-            <SummaryTile label="Couldn't check" value={response.unknown_count} tone="text-status-possible" />
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <SummaryTile label="Deliverable" value={response.deliverable_count} tone="text-status-high" />
+            <SummaryTile
+              label="Undeliverable"
+              value={response.undeliverable_count}
+              tone="text-status-danger"
+            />
+            <SummaryTile label="Risky" value={response.risky_count} tone="text-status-possible" />
+            <SummaryTile label="Couldn't check" value={response.unknown_count} tone="text-ink-300" />
           </div>
+
+          {!response.mailbox_checks_available && (
+            <p className="rounded-lg border border-status-possible/30 bg-status-possible/10 px-4 py-3 text-sm leading-relaxed text-status-possible">
+              No verification provider is configured, so only each domain was checked — not
+              whether the individual mailbox exists. That&apos;s why well-formed addresses come
+              back <strong className="font-semibold">Risky</strong> rather than Deliverable. Set{" "}
+              <code className="rounded bg-base-800 px-1 py-0.5 text-xs">EMAIL_VERIFY_PROVIDER</code>{" "}
+              to get mailbox-level verdicts.
+            </p>
+          )}
 
           <div className="overflow-hidden rounded-2xl border border-base-700 bg-base-850 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-base-700 px-5 py-3">
@@ -140,7 +164,7 @@ export default function EmailVerifier() {
                   className="inline-flex items-center gap-1.5 rounded-md border border-base-600 px-3 py-1.5 text-xs font-semibold text-ink-300 hover:border-brand-500 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Icon name="copy" className="h-3.5 w-3.5" />
-                  Copy valid addresses
+                  Copy deliverable addresses
                 </button>
               </div>
             </div>
@@ -160,7 +184,11 @@ export default function EmailVerifier() {
                       <td className="px-3 py-3">
                         <EmailCheckBadge status={r.status} />
                       </td>
-                      <td className="px-5 py-3 text-ink-500">{EMAIL_CHECK_STATUS[r.status].description}</td>
+                      <td className="px-5 py-3 text-ink-500">
+                        {/* The reason is the useful part — why it will bounce,
+                            not just that it might. */}
+                        {EMAIL_CHECK_REASON[r.reason] ?? EMAIL_CHECK_STATUS[r.status].description}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

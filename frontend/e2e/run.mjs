@@ -192,13 +192,31 @@ async function mockApi(page, { loggedIn, admin = false }) {
       });
     }
     if (path === "/emails/verify") {
-      const statusFor = (e) => (!e.includes("@") ? "invalid_format" : e.includes("dead") ? "no_mail_server" : "valid");
-      const res = body.emails.map((email) => ({ email, status: statusFor(email), syntax_valid: email.includes("@"), domain_accepts_mail: statusFor(email) === "valid" }));
+      // Stands in for a configured verification provider, so the deliverable
+      // path — the one that matters — is what gets exercised.
+      const verdictFor = (e) => {
+        if (!e.includes("@")) return ["undeliverable", "invalid_format"];
+        if (e.includes("dead")) return ["undeliverable", "no_mail_server"];
+        return ["deliverable", "mailbox_confirmed"];
+      };
+      const res = body.emails.map((email) => {
+        const [status, reason] = verdictFor(email);
+        return {
+          email,
+          status,
+          reason,
+          syntax_valid: email.includes("@"),
+          domain_accepts_mail: reason !== "invalid_format" ? reason !== "no_mail_server" : null,
+        };
+      });
+      const count = (s) => res.filter((r) => r.status === s).length;
       return json(200, {
         results: res,
-        valid_count: res.filter((r) => r.status === "valid").length,
-        invalid_count: res.filter((r) => r.status !== "valid").length,
-        unknown_count: 0,
+        deliverable_count: count("deliverable"),
+        undeliverable_count: count("undeliverable"),
+        risky_count: count("risky"),
+        unknown_count: count("unknown"),
+        mailbox_checks_available: true,
       });
     }
     if (path === "/companies/save") return json(200, { id: "c-123", company_name: body.company_name });
@@ -309,6 +327,55 @@ await test("Footer reaches the Terms and Privacy pages", async () => {
   // The unfilled placeholders are meant to be impossible to miss — if this
   // ever stops matching, check it was filled in rather than deleted.
   await expectVisible(page.getByText("[LEGAL ENTITY NAME]").first(), "visible placeholder");
+
+  assertNoErrors(errors);
+  await context.close();
+});
+
+await test("Public pages set their own title and canonical; private pages are noindex", async () => {
+  const { page, context, errors } = await newPage();
+
+  await page.goto("/");
+  const homeTitle = await page.title();
+  assert(homeTitle.includes("PetroLead"), `home title was ${homeTitle}`);
+
+  // The tags are written by an effect after mount, so wait for the value
+  // rather than reading whatever index.html shipped with.
+  await page.goto("/pricing");
+  await page
+    .waitForFunction(
+      () =>
+        document.querySelector('link[rel="canonical"]')?.getAttribute("href") ===
+        "https://petrolead.org/pricing",
+      { timeout: 5000 },
+    )
+    .catch(() => {
+      throw new Error("canonical never became https://petrolead.org/pricing");
+    });
+
+  const pricingTitle = await page.title();
+  assert(pricingTitle !== homeTitle, "every route shares one title");
+  assert(/pricing/i.test(pricingTitle), `pricing title was ${pricingTitle}`);
+  const robots = await page.getAttribute('meta[name="robots"]', "content");
+  assert(/index/.test(robots) && !/noindex/.test(robots), `public robots was ${robots}`);
+
+  // Nobody should reach the sign-in page from a search result.
+  await page.goto("/login");
+  await page
+    .waitForFunction(
+      () =>
+        /noindex/.test(
+          document.querySelector('meta[name="robots"]')?.getAttribute("content") || "",
+        ),
+      { timeout: 5000 },
+    )
+    .catch(() => {
+      throw new Error("the login page never became noindex");
+    });
+  assert(
+    (await page.locator('link[rel="canonical"]').count()) === 0,
+    "the login page claims a canonical URL, which invites indexing",
+  );
 
   assertNoErrors(errors);
   await context.close();
@@ -472,18 +539,27 @@ await test("Email Verifier: counts, results, limit and copy", async () => {
   const button = page.getByRole("button", { name: "Verify emails" });
   assert(await button.isDisabled(), "Verify button enabled with no input");
 
-  await textarea.fill(Array.from({ length: 51 }, (_, i) => `p${i}@gulfstar.example`).join("\n"));
+  await textarea.fill(Array.from({ length: 501 }, (_, i) => `p${i}@gulfstar.example`).join("\n"));
   await expectVisible(page.getByText("remove 1 to continue"), "over-limit message");
   assert(await button.isDisabled(), "Verify button enabled over the limit");
 
   await textarea.fill("jane@gulfstar.example, bob@dead-domain.example\nnot-an-email");
-  await expectVisible(page.getByText("3 of 50 addresses"), "address counter");
+  await expectVisible(page.getByText("3 of 500 addresses"), "address counter");
   await button.click();
   await expectVisible(page.getByRole("cell", { name: "bob@dead-domain.example" }), "results table");
-  await expectVisible(page.getByText("No mail server", { exact: true }), "no mail server label");
-  await expectVisible(page.getByText("Invalid format", { exact: true }), "invalid format label");
+  await expectVisible(page.getByText("Deliverable", { exact: true }), "deliverable label");
+  // Assert the reason, not just the status: two different failures both read
+  // "Undeliverable", and the reason is what tells them apart.
+  await expectVisible(
+    page.getByText("The domain has no mail servers, so mail to it bounces."),
+    "no-mail-server reason",
+  );
+  await expectVisible(
+    page.getByText("This isn't a correctly formatted email address."),
+    "invalid-format reason",
+  );
 
-  await page.getByRole("button", { name: "Copy valid addresses" }).click();
+  await page.getByRole("button", { name: "Copy deliverable addresses" }).click();
   await expectVisible(page.getByText("Copied 1 addresses"), "copy confirmation");
   const clip = await page.evaluate(() => navigator.clipboard.readText());
   assert(clip === "jane@gulfstar.example", `clipboard contained ${JSON.stringify(clip)}`);

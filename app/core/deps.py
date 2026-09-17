@@ -28,13 +28,22 @@ def get_current_user(
     if credentials is None:
         raise unauthorized
 
-    user_id = decode_access_token(credentials.credentials, settings=get_settings())
-    if user_id is None:
+    claims = decode_access_token(credentials.credentials, settings=get_settings())
+    if claims is None:
         raise unauthorized
 
-    user = db.get(User, user_id)
+    user = db.get(User, claims.user_id)
     if user is None or not user.is_active:
         raise unauthorized
+
+    # The account's sessions were revoked (password change, "sign out other
+    # devices", or an admin ending them) after this token was issued.
+    if claims.token_version != user.token_version:
+        raise HTTPException(
+            status_code=401,
+            detail="This session has ended. Please log in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     return user
 

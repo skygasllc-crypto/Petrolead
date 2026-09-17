@@ -9,7 +9,7 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, 
 
 ALLOWED_LIMITS = {10, 25, 50, 100}
 MAX_BULK_LOOKUP_ITEMS = 25
-MAX_VERIFY_EMAILS = 50
+MAX_VERIFY_EMAILS = 500
 
 
 class DiscoverUrlRequestSchema(BaseModel):
@@ -412,8 +412,29 @@ class VerifyEmailsRequestSchema(BaseModel):
 
 
 class VerifiedEmailSchema(BaseModel):
+    """One graded address.
+
+    `status` answers "will this bounce?" and `reason` says why. Only
+    `deliverable` is safe to send to — `risky` covers catch-all domains,
+    shared role inboxes and (without a verification provider configured)
+    addresses where only the domain could be checked.
+    """
+
     email: str
-    status: Literal["valid", "invalid_format", "no_mail_server", "unknown"]
+    status: Literal["deliverable", "undeliverable", "risky", "unknown"]
+    reason: Literal[
+        "mailbox_confirmed",
+        "invalid_format",
+        "no_mail_server",
+        "disposable_domain",
+        "typo_suspected",
+        "mailbox_not_found",
+        "catch_all",
+        "role_account",
+        "domain_only",
+        "dns_error",
+        "provider_error",
+    ]
     syntax_valid: bool
     # None when the format was invalid (no lookup ran) or the DNS check failed.
     domain_accepts_mail: bool | None
@@ -421,9 +442,14 @@ class VerifiedEmailSchema(BaseModel):
 
 class VerifyEmailsResponseSchema(BaseModel):
     results: list[VerifiedEmailSchema]
-    valid_count: int
-    invalid_count: int
+    deliverable_count: int
+    undeliverable_count: int
+    risky_count: int
     unknown_count: int
+    # False when no verification provider is configured, so nothing in this
+    # batch could be confirmed at the mailbox level — the UI says so rather
+    # than letting "risky" read as a fault in the addresses.
+    mailbox_checks_available: bool
 
 
 class ErrorResponseSchema(BaseModel):

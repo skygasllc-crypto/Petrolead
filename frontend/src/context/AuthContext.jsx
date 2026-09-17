@@ -28,20 +28,29 @@ export function AuthProvider({ children }) {
       .finally(() => setLoading(false));
   }, []);
 
-  async function login(email, password) {
-    const result = await api.login({ email, password });
+  /** Store the token and user from any endpoint that returns them. Changing
+      the password and signing out other devices both issue a new token — if
+      it isn't stored, this tab's next request fails with the session it just
+      ended. */
+  const applyAuthResult = useCallback((result) => {
     setToken(result.access_token);
     setUser(result.user);
+  }, []);
+
+  async function login(email, password) {
+    applyAuthResult(await api.login({ email, password }));
   }
 
   async function register(email, password, fullName) {
-    const result = await api.register({ email, password, full_name: fullName || undefined });
-    setToken(result.access_token);
-    setUser(result.user);
+    applyAuthResult(
+      await api.register({ email, password, full_name: fullName || undefined }),
+    );
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider
+      value={{ user, loading, login, register, logout, applyAuthResult }}
+    >
       {children}
     </AuthContext.Provider>
   );

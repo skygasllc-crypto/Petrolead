@@ -81,7 +81,7 @@ function ScorePill({ score }) {
 
 function ResultsMock() {
   return (
-    <BrowserFrame url="app.petrolead.example/discover">
+    <BrowserFrame url="app.petrolead.org/discover">
       <div className="p-4">
         <div className="flex flex-wrap items-center gap-2">
           {["Middle East", "Refining & trading", "Diesel", "Jet A-1"].map((f) => (
@@ -160,7 +160,7 @@ function FiltersMock() {
     ["Include B2B directory listings", true],
   ];
   return (
-    <BrowserFrame url="app.petrolead.example/discover">
+    <BrowserFrame url="app.petrolead.org/discover">
       <div className="grid grid-cols-2 gap-3 p-5">
         <FakeSelect label="Region" value="Middle East" />
         <FakeSelect label="Country" value="United Arab Emirates" />
@@ -211,7 +211,7 @@ function LeadScoreMock() {
     ["Phone numbers", "2 found"],
   ];
   return (
-    <BrowserFrame url="app.petrolead.example/companies/gulfstar-refining">
+    <BrowserFrame url="app.petrolead.org/companies/gulfstar-refining">
       <div className="p-5">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -256,7 +256,7 @@ function ScheduleMock() {
     ["LPG importers — Southeast Asia", "Weekly", "No new companies", false],
   ];
   return (
-    <BrowserFrame url="app.petrolead.example/scheduled">
+    <BrowserFrame url="app.petrolead.org/scheduled">
       <div className="p-5">
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold uppercase tracking-wide text-ink-700">

@@ -352,10 +352,12 @@ different server or Chromium.
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/health` | Liveness check — the only endpoint besides `/api/auth/*` that doesn't require a logged-in user. |
+| `GET` | `/api/health` | Liveness check — one of only three endpoints that work without a logged-in user, with `/api/auth/register` and `/api/auth/login`. |
 | `POST` | `/api/auth/register` | Create an account. Body: `email`, `password` (8+ chars), `full_name` (optional). Returns a bearer token + the new user. |
 | `POST` | `/api/auth/login` | Body: `email`, `password`. Returns a bearer token + the user. |
 | `GET` | `/api/auth/me` | The current logged-in user, from the `Authorization: Bearer <token>` header. |
+| `POST` | `/api/auth/change-password` | *(logged in)* Body: `current_password`, `new_password` (8+ chars). Ends every other session; returns a fresh token for this one. |
+| `POST` | `/api/auth/revoke-sessions` | *(logged in)* "Sign out other devices" — every token issued before now stops working. Returns a fresh token for the caller. |
 | `POST` | `/api/discover` | Run a discovery job. Body: region, country, city, industry, activity, products[], keywords[], limit, `include_social_search`, `include_b2b_directories` (Phase 5/6, both default `false`). **Preview only — nothing is saved.** Returns deduplicated (in-memory only) candidates, each scored and flagged `already_saved`/`existing_company_id` against your saved companies. |
 | `POST` | `/api/discover-url` | "Paste a link" quick lookup — body: `{"url": "..."}`. For a company website, fetches that one page (+ its Contact page if found) and extracts name/description/contact/social/emails/phones the same way discovery enrichment does. For a personal LinkedIn profile URL (`linkedin.com/in/...`), the page itself is login-gated and never fetched — instead it looks up whatever public search-engine snippet exists for it and returns `contact_person_name`/`contact_person_title` alongside the company it mentions, if any, plus a business email if `HUNTER_IO_API_KEY` is configured and finds a confident match. **Preview only — nothing is saved.** Returns `422` with a clear message if nothing usable was found. |
 | `POST` | `/api/companies/save` | Persist one previewed candidate — the body is the same object `/discover` or `/discover-url` returned for that row. Creates a new company, or merges into an existing match (dedup is the same logic either way). |
@@ -372,7 +374,7 @@ different server or Chromium.
 | `DELETE` | `/api/saved-searches/{id}` | Delete a saved search. |
 | `POST` | `/api/saved-searches/run-due` | Manually run whichever saved searches are currently due (no worker required). |
 | `POST` | `/api/contacts/bulk-lookup` | Look up to 25 people at once — each item is `{"url": "linkedin.com/in/..."}` or `{"full_name", "company_name"}`. **Preview only.** |
-| `POST` | `/api/emails/verify` | Email Verifier — body: `{"emails": [...]}` (up to 50). Checks each address's format, then whether its domain has mail (MX) records; never contacts the mailbox. |
+| `POST` | `/api/emails/verify` | Email Verifier — body: `{"emails": [...]}` (up to 500). Grades each address `deliverable`/`undeliverable`/`risky`/`unknown` with a `reason`. Format, throwaway domains and known typos are decided locally; MX lookups are grouped by domain and run concurrently under a whole-batch budget; mailbox-level confirmation depends on `EMAIL_VERIFY_PROVIDER` (the default `mx` has none, so nothing is graded `deliverable`). No message is ever sent to the address. |
 | `GET` | `/api/billing/me` | The current user's plan, credit balance, renewal date, paid-until date, today's search count and plan limits. |
 | `GET` | `/api/billing/payment-methods` | Coins accepted for plans (those with a receiving address configured). |
 | `POST` | `/api/billing/orders` | Start paying for a plan — body: `plan`, `credits_per_month`, `billing_period` (`monthly`\|`yearly`), `currency` (`BTC`\|`USDT_TRC20`\|`TRX`). Returns the address and exact amount; the price comes from `app/services/plans.py`. |
@@ -385,6 +387,7 @@ different server or Chromium.
 | `POST` | `/api/admin/payments/{id}/reject` | *(admin)* Reject a payment — body: `{"note"}`, shown to the customer. |
 | `GET` | `/api/admin/users` | *(admin)* Every account, with its plan and credit balance. |
 | `PATCH` | `/api/admin/users/{id}` | *(admin)* Block/unblock — body: `{"is_active": bool}`. |
+| `POST` | `/api/admin/users/{id}/revoke-sessions` | *(admin)* End every session for an account without blocking it — for a login that may have been stolen. They can log straight back in. |
 | `PUT` | `/api/admin/users/{id}/subscription` | *(admin)* Put a user on a plan — body: `{"plan", "credits_per_month"}`. A new plan grants its first month of credits immediately. |
 | `DELETE` | `/api/admin/users/{id}/subscription` | *(admin)* Remove a user's plan and remaining credits. |
 | `POST` | `/api/admin/users/{id}/credits` | *(admin)* Add or remove credits — body: `{"amount", "note"}`. The balance never goes below zero. |
@@ -394,14 +397,17 @@ returns `422` with a structured error body. Unexpected server errors return
 a generic `500`/`502` message — full details go to the server logs only,
 never to the client.
 
-**Authentication.** Every endpoint except `/api/health` and `/api/auth/*`
-requires `Authorization: Bearer <token>` (obtained from `/register` or
-`/login`); a missing/invalid/expired token gets a `401`. Each account's
-saved companies, emails, search history and scheduled searches are private to
-it — every query is scoped to the signed-in user, and duplicate detection only
-matches against that user's own companies. Sessions are stateless JWTs
-(`ACCESS_TOKEN_EXPIRE_MINUTES`, default 1 week) — there's no server-side
-session store, so a token can't be revoked before it expires.
+**Authentication.** Every endpoint except `/api/health`,
+`/api/auth/register` and `/api/auth/login` requires
+`Authorization: Bearer <token>`; a missing/invalid/expired token gets a
+`401`. Each account's saved companies, emails, search history and scheduled
+searches are private to it — every query is scoped to the signed-in user, and
+duplicate detection only matches against that user's own companies. Sessions
+are stateless JWTs (`ACCESS_TOKEN_EXPIRE_MINUTES`, default 1 week), but they
+are not unrevokable: each token carries the account's `token_version` and is
+checked against the database on every request, so a password change, "sign
+out other devices", or an admin ending an account's sessions invalidates
+every token issued before it.
 
 **Plans & credits.** With `BILLING_ENFORCED=true` (the default), a new
 account has no plan and can't use the lookup tools until an admin assigns
@@ -467,6 +473,47 @@ explorer — the app never holds wallet keys and can't see your wallet.
   is a public MX-record DNS lookup (email) and structural/format checking
   via libphonenumber (phone) — PetroLead never sends an email or places a
   call to verify a lead.
+- **Password guessing is rate limited.** Every client address gets
+  `AUTH_RATE_LIMIT_PER_MINUTE` attempts at `/auth/login` and `/auth/register`
+  and `RATE_LIMIT_PER_MINUTE` elsewhere, answered with a `429` and a
+  `Retry-After` beyond that. Counting is per process and in memory, so with
+  two web workers the real limit is double the configured one — it slows
+  guessing down, it is not a billing control. Behind a load balancer set
+  `TRUST_PROXY_HEADERS=true`, or every request looks like it came from the
+  balancer; leave it off otherwise, since a caller can forge the header and
+  hand themselves a fresh allowance.
+- **The app won't fetch private addresses.** `POST /api/discover-url` takes
+  a URL the caller chose, so `app/core/net_guard.py` resolves the hostname
+  first and refuses loopback, RFC1918, link-local and reserved addresses —
+  which is what stops it being used to read a cloud metadata service
+  (`169.254.169.254`) or the API's own admin endpoints. Redirects are
+  re-checked, because a public URL can redirect to a private one. The one
+  hole left is DNS rebinding between our check and the socket's own lookup;
+  closing it needs the connection pinned to the validated address.
+- **A login costs the same whether or not the account exists.** The
+  password is checked against a throwaway hash for an unknown address, so
+  response time can't be used to enumerate which emails are registered.
+- **The API describes itself in development only.** `/docs`, `/redoc` and
+  `/openapi.json` are removed outside development (`DOCS_ENABLED` overrides
+  it either way).
+- **Hardening headers on every response.** `nosniff`, `DENY` framing, a
+  `strict-origin-when-cross-origin` referrer policy, an empty CSP (every
+  response is JSON), and HSTS outside development.
+- **Sessions can be ended before they expire.** Tokens are stateless and
+  last a week, so each one is stamped with the account's `token_version`
+  and checked against the database on every request. Bumping that version
+  invalidates every token issued before it: changing a password does it
+  automatically, `POST /api/auth/revoke-sessions` does it on request ("sign
+  out other devices"), and `POST /api/admin/users/{id}/revoke-sessions`
+  lets an admin end a compromised account's sessions *without* blocking the
+  account — the customer just logs in again. Each of these returns a fresh
+  token so the caller isn't signed out of the device they're using. Tokens
+  minted before this existed carry no version and are refused rather than
+  assumed to be version zero.
+- **The app refuses to start on the development signing key.** Any
+  `APP_ENV` other than `development` with the default `SECRET_KEY` is a
+  hard startup failure, not a warning — that key is published in this repo,
+  and anyone holding it can mint a session token for any account.
 - **Secrets stay in `.env`.** No API key is hard-coded; `.env` is
   git-ignored and `.env.example` ships placeholders only.
 - **Authentication.** Passwords are hashed with bcrypt (salted per-user,

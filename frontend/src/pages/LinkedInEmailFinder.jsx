@@ -77,7 +77,7 @@ const STEPS = [
 
 function ContactsTableMock() {
   return (
-    <BrowserFrame url="app.petrolead.example/emails">
+    <BrowserFrame url="app.petrolead.org/emails">
       <div className="flex">
         <div className="hidden w-44 shrink-0 border-r border-base-700 p-3 sm:block">
           <div className="text-[11px] font-semibold text-ink-700">Lists</div>
@@ -145,7 +145,7 @@ function ContactsTableMock() {
 function QuickLookupMock() {
   const [name, company, email, status, title] = SAMPLE_CONTACTS[0];
   return (
-    <BrowserFrame url="app.petrolead.example/email-finder">
+    <BrowserFrame url="app.petrolead.org/email-finder">
       <div className="p-5">
         <div className="text-xs font-semibold uppercase tracking-wide text-ink-700">
           LinkedIn profile
@@ -201,7 +201,7 @@ function QuickLookupMock() {
 function BulkLookupMock() {
   const rows = SAMPLE_CONTACTS.slice(1, 4);
   return (
-    <BrowserFrame url="app.petrolead.example/email-finder?tab=bulk">
+    <BrowserFrame url="app.petrolead.org/email-finder?tab=bulk">
       <div className="p-5">
         <div className="text-xs font-semibold uppercase tracking-wide text-ink-700">Bulk lookup</div>
         <div className="mt-3 rounded-md border border-base-600 bg-base-850 px-3 py-2 font-mono text-[11px] leading-6 text-ink-300">
@@ -245,7 +245,7 @@ function NameCompanyMock() {
     ["Business email found", email],
   ];
   return (
-    <BrowserFrame url="app.petrolead.example/email-finder?tab=name">
+    <BrowserFrame url="app.petrolead.org/email-finder?tab=name">
       <div className="p-5">
         <div className="text-xs font-semibold uppercase tracking-wide text-ink-700">
           Name + company

@@ -126,6 +126,20 @@ export const api = {
 
   me: () => request("/auth/me"),
 
+  // Both of these end every other session and return a fresh token, so the
+  // browser that asked stays signed in — store the new token or this tab
+  // logs itself out on its next request.
+  changePassword: (currentPassword, newPassword) =>
+    request("/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
+    }),
+
+  revokeSessions: () => request("/auth/revoke-sessions", { method: "POST" }),
+
+  adminRevokeSessions: (userId) =>
+    request(`/admin/users/${userId}/revoke-sessions`, { method: "POST" }),
+
   discover: (payload) =>
     request("/discover", { method: "POST", body: JSON.stringify(payload) }),
 

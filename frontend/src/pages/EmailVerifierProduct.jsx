@@ -20,26 +20,30 @@ import { EMAIL_CHECK_STATUS, MAX_VERIFY_EMAILS } from "../lib/emailChecks";
 const APP_PATH = "/verify-emails";
 
 const SAMPLE_RESULTS = [
-  ["a.haddad@gulfstar.example", "valid"],
-  ["sales@nordicbunker.example", "valid"],
-  ["p.raman@coastlinelube", "invalid_format"],
-  ["orders@closed-refinery.example", "no_mail_server"],
-  ["c.wei@harborlpg.example", "valid"],
+  ["a.haddad@gulfstar.example", "deliverable"],
+  ["sales@nordicbunker.example", "risky"],
+  ["p.raman@coastlinelube", "undeliverable"],
+  ["orders@closed-refinery.example", "undeliverable"],
+  ["c.wei@harborlpg.example", "deliverable"],
   ["info@slow-dns.example", "unknown"],
 ];
 
 const FAQS = [
   {
     q: "How does the Email Verifier work?",
-    a: "It runs two checks on every address. First it confirms the address is correctly formatted. Then it looks up the domain's mail (MX) records to confirm the domain is set up to receive email.",
+    a: "Every address is graded Deliverable, Undeliverable, Risky or Couldn't check. Format, throwaway domains and misspelled providers are decided immediately; then the domain's mail (MX) records are checked; then, where a verification provider is configured, the mail server is asked whether that specific mailbox exists.",
   },
   {
     q: "Does it send an email to the address?",
-    a: "No. PetroLead never sends a message or connects to the mailbox. Both checks use only public information — the address itself and the domain's DNS records.",
+    a: "No. PetroLead never sends a message. A verification provider asks the receiving mail server whether the mailbox exists and hangs up without delivering anything — the person is never contacted and never sees a test email.",
   },
   {
     q: "Can it confirm a specific mailbox exists?",
-    a: "No. \"Domain accepts mail\" means email can be delivered to that domain — not that this particular person's mailbox exists. It catches typos, fake addresses and dead domains, which are the most common causes of bounces.",
+    a: "With a verification provider configured, yes — that's what Deliverable means. Without one, only the domain is checked, and well-formed addresses are marked Risky rather than Deliverable, because a domain that accepts mail doesn't prove a particular mailbox does.",
+  },
+  {
+    q: "Will verified addresses never bounce?",
+    a: "Nothing can promise that, and any service claiming 100% is overselling. A mailbox can fill up, or be closed the day after it was checked. What verification does is remove the addresses that would certainly bounce and flag the ones that might, so what's left is far safer to send to.",
   },
   {
     q: "What does \"Couldn't check\" mean?",
@@ -77,7 +81,7 @@ const STEPS = [
 
 function VerifierMock({ rows = SAMPLE_RESULTS }) {
   return (
-    <BrowserFrame url="app.petrolead.example/verify-emails">
+    <BrowserFrame url="app.petrolead.org/verify-emails">
       <div className="p-5">
         <div className="text-xs font-semibold uppercase tracking-wide text-ink-700">Email addresses</div>
         <div className="mt-2 rounded-md border border-brand-500 bg-base-850 px-3 py-2 font-mono text-[11px] leading-6 text-ink-300">
@@ -125,7 +129,7 @@ function VerifierMock({ rows = SAMPLE_RESULTS }) {
 
 function StatusLegendMock() {
   return (
-    <BrowserFrame url="app.petrolead.example/verify-emails">
+    <BrowserFrame url="app.petrolead.org/verify-emails">
       <ul className="flex flex-col gap-3 p-5">
         {Object.entries(EMAIL_CHECK_STATUS).map(([status, { description }]) => (
           <li key={status} className="rounded-xl border border-base-700 bg-base-900 p-4">
@@ -140,12 +144,12 @@ function StatusLegendMock() {
 
 function BulkSummaryMock() {
   const tiles = [
-    ["Domain accepts mail", 41, "text-status-high"],
-    ["Invalid or no mail server", 7, "text-status-danger"],
-    ["Couldn't check", 2, "text-status-possible"],
+    ["Deliverable", 41, "text-status-high"],
+    ["Undeliverable", 7, "text-status-danger"],
+    ["Risky", 2, "text-status-possible"],
   ];
   return (
-    <BrowserFrame url="app.petrolead.example/verify-emails">
+    <BrowserFrame url="app.petrolead.org/verify-emails">
       <div className="p-5">
         <div className="grid grid-cols-3 gap-2">
           {tiles.map(([label, value, tone]) => (
@@ -156,9 +160,9 @@ function BulkSummaryMock() {
           ))}
         </div>
         <div className="mt-4 flex items-center justify-between rounded-xl border border-base-700 bg-base-900 px-4 py-3">
-          <span className="text-xs font-semibold text-ink-100">50 addresses checked</span>
+          <span className="text-xs font-semibold text-ink-100">500 addresses checked</span>
           <span className="inline-flex items-center gap-1.5 rounded-md border border-base-600 bg-base-850 px-3 py-1.5 text-[11px] font-semibold text-ink-300">
-            <Icon name="copy" className="h-3.5 w-3.5" /> Copy valid addresses
+            <Icon name="copy" className="h-3.5 w-3.5" /> Copy deliverable addresses
           </span>
         </div>
         <div className="mt-3 text-center text-[11px] font-medium text-status-high">
@@ -207,15 +211,15 @@ export default function EmailVerifierProduct() {
 
         <FeatureBlock title="Know exactly what each result means" mock={<StatusLegendMock />} reverse>
           <FeatureText>
-            No vague scores. Every address gets one of four plain-language results, and
-            PetroLead is upfront about what the checks can and can&apos;t tell you: a domain
-            that accepts mail doesn&apos;t guarantee a particular mailbox exists.
+            No vague scores. Every address is graded on one question — will this bounce? — and
+            each result says why, so you know whether you&apos;re looking at a typo, a dead
+            domain or a shared inbox.
           </FeatureText>
           <CheckList
             items={[
-              "Domain accepts mail, No mail server, Invalid format or Couldn't check",
-              "Temporary DNS problems never reported as invalid",
-              "Public DNS lookups only — no mailbox probing",
+              "Deliverable, Undeliverable, Risky or Couldn't check — plus the reason",
+              "Only Deliverable addresses are copied and exported",
+              "Temporary DNS problems never reported as undeliverable",
             ]}
           />
           <FeatureCta appPath={APP_PATH} label="Try the verifier" variant="soft" />

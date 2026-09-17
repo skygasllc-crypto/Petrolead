@@ -22,6 +22,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.config import Settings, get_settings
+from app.core.net_guard import MAX_REDIRECTS, BlockedURLError, block_internal_requests
 from app.discovery.contacts import find_contact_page, find_social_profiles
 from app.discovery.emails import MAX_EMAILS_PER_COMPANY, extract_emails, validate_email_domain
 from app.discovery.normalizer import extract_domain
@@ -115,6 +116,10 @@ async def _fetch_page(
     try:
         response = await client.get(url)
         response.raise_for_status()
+    except BlockedURLError as exc:
+        # Someone pointed us at a private address (see app.core.net_guard).
+        logger.warning("extractor: refused to fetch %s (%s)", url, exc)
+        return None
     except (httpx.HTTPError, httpx.InvalidURL) as exc:
         logger.warning("extractor: could not fetch %s (%s)", url, exc)
         return None
@@ -146,8 +151,14 @@ async def enrich_from_website(
     settings = settings or get_settings()
     headers = {"User-Agent": settings.http_user_agent}
 
+    # The hook runs for the first request and for every redirect, so a
+    # public URL can't bounce us into the private network.
     async with httpx.AsyncClient(
-        timeout=settings.http_timeout_seconds, follow_redirects=True, headers=headers
+        timeout=settings.http_timeout_seconds,
+        follow_redirects=True,
+        max_redirects=MAX_REDIRECTS,
+        headers=headers,
+        event_hooks={"request": [block_internal_requests]},
     ) as client:
         home = await _fetch_page(client, company.website)
         if home is None:

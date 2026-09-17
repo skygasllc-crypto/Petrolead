@@ -46,6 +46,16 @@ services:
         sync: false
       - key: BILLING_ENFORCED
         value: "true"
+      # Every request arrives through Render's proxy, so the socket address
+      # is Render's, not the caller's. Without this the rate limiter counts
+      # all customers against one address and throttles them collectively.
+      - key: TRUST_PROXY_HEADERS
+        value: "true"
+      - key: RATE_LIMIT_ENABLED
+        value: "true"
+      # Belt and braces: APP_ENV=production already removes the docs routes.
+      - key: DOCS_ENABLED
+        value: "false"
       # Search provider: set SEARCH_PROVIDER and the matching key, or the app
       # serves mock data that is clearly labelled as fake.
       - key: SEARCH_PROVIDER

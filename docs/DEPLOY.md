@@ -30,6 +30,29 @@ on every register and login, and it only ever grants admin rights — never
 revokes them. Get it right the first time; removing an address later does not
 demote an account that already has the flag.
 
+**Then register those accounts immediately, before announcing the site.**
+Admin rights are granted to whoever registers a listed address — the app has
+no way to tell the owner of an address from someone who merely typed it. On a
+fresh database that means anyone who signs up with your admin address first
+becomes an admin: they could confirm their own crypto payments, read every
+account, and grant themselves any plan. Registering the admin accounts is
+therefore the first thing to do after the first deploy, not a later chore.
+Verify it worked before going further:
+
+```sql
+SELECT email, is_admin FROM users WHERE is_admin = true;
+```
+
+If a listed address does not appear there, nobody holds it yet and the window
+is still open. The app also logs a warning naming any unclaimed address every
+time it starts, so this is hard to forget.
+
+**Everyone signs in once after this release.** Session tokens now carry the
+version of the account they were issued at, and tokens minted before that
+existed have no version, so they are refused. Expect one round of logins —
+yours included — the first time this deploys. It is not a fault, and it only
+happens once.
+
 **Have the wallet addresses ready.** `CRYPTO_BTC_ADDRESS`,
 `CRYPTO_USDT_TRC20_ADDRESS`, `CRYPTO_TRX_ADDRESS` are **public receiving
 addresses only**. A private key or seed phrase must never be set here, in the
@@ -90,10 +113,13 @@ Set these on the API service. The worker needs the same values for
 | `DATABASE_URL` | yes | From the managed database. A `postgres://` URL is rewritten to `postgresql+psycopg://` automatically. |
 | `REDIS_URL` | worker only | Celery broker. The API runs without it. |
 | `RUN_MIGRATIONS_ON_STARTUP` | yes | `false` in production — see step 4. |
-| `CORS_ORIGINS` | yes | Every origin the SPA is served from, comma-separated, e.g. `https://petrolead.com,https://www.petrolead.com`. A missing origin means every API call fails in the browser with no useful error. |
+| `CORS_ORIGINS` | yes | Every origin the SPA is served from, comma-separated: `https://petrolead.org,https://www.petrolead.org`. Include the `www.` form if it resolves — a missing origin means every API call fails in the browser with no useful error. |
 | `APP_BASE_URL` | yes | Public URL of the frontend. Used for links in admin payment emails. |
 | `ADMIN_EMAILS` | yes | Who can confirm payments and manage accounts. |
 | `BILLING_ENFORCED` | yes | `true` in production. `false` disables all plan and credit limits for everyone. |
+| `TRUST_PROXY_HEADERS` | yes, on a managed platform | `true`. Requests arrive through the platform's proxy, so without this the rate limiter sees one address for all traffic and throttles every customer together. Leave it `false` anywhere the app is exposed directly, or callers can forge `X-Forwarded-For` and reset their own allowance. |
+| `RATE_LIMIT_ENABLED` / `RATE_LIMIT_PER_MINUTE` / `AUTH_RATE_LIMIT_PER_MINUTE` | recommended | Per client address, per process — with 2 workers the effective limit is doubled. The auth allowance (login/register) is the one that matters for password guessing. |
+| `DOCS_ENABLED` | optional | `APP_ENV=production` already removes `/docs`, `/redoc` and `/openapi.json`; set `false` to be explicit. Must not be an empty string. |
 | `SEARCH_PROVIDER` + its key | yes | Otherwise the app serves clearly-labelled mock data. |
 | `HUNTER_IO_API_KEY` | optional | Person-email enrichment. See `docs/outreach/email-provider-permission.md` before relying on it commercially. |
 | `CRYPTO_*_ADDRESS` | for payments | Public receiving addresses. Unset coins are hidden at checkout. |

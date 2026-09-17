@@ -14,7 +14,46 @@
       name="description"
       content="Find petroleum and energy companies and get verified business emails for their decision-makers."
     />
-    <title>PetroLead — Energy B2B Leads & Verified Emails</title>
+    <title>PetroLead — Energy B2B Leads &amp; Verified Emails</title>
+
+    <!-- Defaults for the first paint and for crawlers that don't run JS.
+         src/components/Seo.jsx rewrites these per route on navigation. -->
+    <link rel="canonical" href="https://petrolead.org/" />
+    <meta name="robots" content="index, follow" />
+    <meta name="theme-color" content="#0f172a" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="PetroLead" />
+    <meta property="og:url" content="https://petrolead.org/" />
+    <meta property="og:title" content="PetroLead — Energy B2B Leads &amp; Verified Emails" />
+    <meta
+      property="og:description"
+      content="Find petroleum and energy companies and get verified business emails for their decision-makers."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="PetroLead — Energy B2B Leads &amp; Verified Emails" />
+    <meta
+      name="twitter:description"
+      content="Find petroleum and energy companies and get verified business emails for their decision-makers."
+    />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "PetroLead",
+        "url": "https://petrolead.org/",
+        "applicationCategory": "BusinessApplication",
+        "operatingSystem": "Web",
+        "description": "Find petroleum and energy companies and get verified business emails for their decision-makers.",
+        "offers": {
+          "@type": "Offer",
+          "price": "20",
+          "priceCurrency": "USD",
+          "url": "https://petrolead.org/pricing"
+        }
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

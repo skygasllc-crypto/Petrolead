@@ -2,6 +2,7 @@ import { Routes, Route } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import ScrollManager from "./components/ScrollManager";
+import Seo from "./components/Seo";
 import Layout from "./components/Layout";
 import Landing from "./pages/Landing";
 import LinkedInEmailFinder from "./pages/LinkedInEmailFinder";
@@ -33,6 +34,7 @@ export default function App() {
   return (
     <AuthProvider>
       <ScrollManager />
+      <Seo />
       <Routes>
         {/* Public marketing pages */}
         <Route path="/" element={<Landing />} />

@@ -72,7 +72,7 @@ function ExtractorMock() {
     ["procurement@gulfstar.example", "verified"],
   ];
   return (
-    <BrowserFrame url="app.petrolead.example/email-finder?tab=website">
+    <BrowserFrame url="app.petrolead.org/email-finder?tab=website">
       <div className="p-5">
         <div className="flex gap-4 border-b border-base-700 text-[11px] font-semibold">
           <span className="pb-2 text-ink-500">LinkedIn profile</span>
@@ -145,7 +145,7 @@ function SourcesMock() {
     ["info@gulfstar.example", "Email link"],
   ];
   return (
-    <BrowserFrame url="app.petrolead.example/email-finder?tab=website">
+    <BrowserFrame url="app.petrolead.org/email-finder?tab=website">
       <div className="p-5 text-xs">
         <div className="font-semibold uppercase tracking-wide text-ink-700">Pages read</div>
         <ul className="mt-2 flex flex-col gap-2">
@@ -185,7 +185,7 @@ function PhonesMock() {
     ["1998", "Page text · a year, not a phone number", false],
   ];
   return (
-    <BrowserFrame url="app.petrolead.example/email-finder?tab=website">
+    <BrowserFrame url="app.petrolead.org/email-finder?tab=website">
       <div className="p-5">
         <div className="text-xs font-semibold uppercase tracking-wide text-ink-700">Phone numbers</div>
         <ul className="mt-3 flex flex-col gap-2.5">

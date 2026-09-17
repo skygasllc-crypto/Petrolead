@@ -47,6 +47,20 @@ class LoginRequestSchema(BaseModel):
     password: str = Field(min_length=1, max_length=128)
 
 
+class ChangePasswordRequestSchema(BaseModel):
+    """Body for POST /api/auth/change-password."""
+
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def _new_password_fits_bcrypt(cls, value: str) -> str:
+        if len(value.encode("utf-8")) > MAX_PASSWORD_BYTES:
+            raise ValueError(f"Password must be at most {MAX_PASSWORD_BYTES} bytes long.")
+        return value
+
+
 class UserSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

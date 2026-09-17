@@ -55,6 +55,15 @@ class User(Base):
     # see `app.api.auth`.
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Every session token carries the version it was issued at. Bumping this
+    # makes every token issued before now fail on its next request, which is
+    # how "sign out my other devices", a password change, and an admin
+    # revoking a compromised account's sessions all work. Tokens are
+    # otherwise stateless and valid until they expire.
+    token_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     # The account's paid plan and credit balance, or None for no plan.
