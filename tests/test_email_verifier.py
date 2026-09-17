@@ -9,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.config import Settings
+from app.discovery import email_verification as verification
 from app.discovery import emails as emails_module
 from app.discovery.emails import is_valid_email_syntax
 from app.schemas import MAX_VERIFY_EMAILS
@@ -249,6 +250,31 @@ class TestVerifyEmailsEndpoint:
         assert body["results"][0]["status"] == "unknown"
         assert body["results"][0]["domain_accepts_mail"] is None
         assert body["unknown_count"] == 1
+
+    def test_a_provider_that_cannot_decide_falls_back_to_dns(self, client, monkeypatch):
+        """A provider outage must degrade to domain-only grading, never below
+        it. Reporting every address as uncheckable is worse than the answer
+        we could give without any provider at all."""
+
+        class DeadProvider:
+            async def verify(self, addresses):
+                return {
+                    a: verification.Verdict(verification.UNKNOWN, "provider_error")
+                    for a in addresses
+                }
+
+        monkeypatch.setattr(verification, "get_provider", lambda settings: DeadProvider())
+        monkeypatch.setattr(
+            emails_module, "validate_email_domain", _fake_mx({"gulfstar.example": True})
+        )
+
+        response = client.post(
+            "/api/emails/verify", json={"emails": ["jane@gulfstar.example"]}
+        )
+        assert response.status_code == 200
+        result = response.json()["results"][0]
+        assert result["status"] == "risky"
+        assert result["reason"] == "domain_only"
 
     def test_rejects_an_empty_list(self, client):
         response = client.post("/api/emails/verify", json={"emails": []})

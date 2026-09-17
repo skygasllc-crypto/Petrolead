@@ -197,9 +197,17 @@ async def verify_emails(
         pending = [a for a in addresses if a not in settled]
         if pending:
             try:
-                settled.update(await provider.verify(pending))
+                verdicts = await provider.verify(pending)
             except Exception:  # noqa: BLE001 — a provider outage must not 500
                 logger.exception("Verification provider failed; falling back to DNS only")
+            else:
+                # `unknown` from a provider means it couldn't tell us, which
+                # is not a verdict. Leaving those out lets the DNS check below
+                # still run, so an outage degrades to domain-only grading
+                # rather than reporting every address as uncheckable.
+                settled.update(
+                    {a: v for a, v in verdicts.items() if v.status != verification.UNKNOWN}
+                )
 
     # One representative address per domain, for the addresses still open.
     representative: dict[str, str] = {}
