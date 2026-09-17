@@ -23,7 +23,13 @@ than rounding it up.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from dataclasses import dataclass
+
+import httpx
+
+logger = logging.getLogger("petrolead.discovery.email_verification")
 
 # --- Statuses -------------------------------------------------------------
 # deliverable   the mailbox accepted mail when we asked
@@ -156,3 +162,106 @@ def grade_domain_only(address: str) -> Verdict:
     if is_role_account(address):
         return Verdict(RISKY, "role_account")
     return Verdict(RISKY, "domain_only")
+
+
+# --- Providers ------------------------------------------------------------
+
+MILLIONVERIFIER_URL = "https://api.millionverifier.com/api/v3"
+# Their per-address timeout, in seconds. Their API accepts 2-60.
+PROVIDER_TIMEOUT_SECONDS = 20
+# Addresses are checked one request each, so cap how many run at once.
+MAX_CONCURRENT_PROVIDER_CALLS = 10
+
+# How MillionVerifier's `result` maps onto our four verdicts.
+#
+# catch_all is the one that matters: the server accepts every address, so
+# acceptance proves nothing about that mailbox. Grading it deliverable is
+# precisely how a verified list still bounces, so it stays risky.
+_MILLIONVERIFIER_RESULTS = {
+    "ok": Verdict(DELIVERABLE, "mailbox_confirmed"),
+    "invalid": Verdict(UNDELIVERABLE, "mailbox_not_found"),
+    "disposable": Verdict(UNDELIVERABLE, "disposable_domain"),
+    "catch_all": Verdict(RISKY, "catch_all"),
+    "unknown": Verdict(UNKNOWN, "provider_error"),
+    "unverified": Verdict(UNKNOWN, "provider_error"),
+}
+
+
+class MillionVerifierProvider:
+    """Confirms whether an individual mailbox exists.
+
+    One request per address. A failure is reported as `unknown` for that
+    address rather than raised, so one bad response can't discard a batch of
+    500 that otherwise succeeded.
+    """
+
+    name = "millionverifier"
+
+    def __init__(self, api_key: str) -> None:
+        self._api_key = api_key
+
+    async def verify(self, addresses: list[str]) -> dict[str, Verdict]:
+        semaphore = asyncio.Semaphore(MAX_CONCURRENT_PROVIDER_CALLS)
+        results: dict[str, Verdict] = {}
+
+        async with httpx.AsyncClient(timeout=PROVIDER_TIMEOUT_SECONDS + 10) as client:
+
+            async def check(address: str) -> None:
+                async with semaphore:
+                    results[address] = await self._verify_one(client, address)
+
+            await asyncio.gather(*(check(a) for a in addresses))
+        return results
+
+    async def _verify_one(self, client: httpx.AsyncClient, address: str) -> Verdict:
+        try:
+            response = await client.get(
+                MILLIONVERIFIER_URL,
+                params={
+                    "api": self._api_key,
+                    "email": address,
+                    "timeout": PROVIDER_TIMEOUT_SECONDS,
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("Verification provider failed for %s: %s", address, exc)
+            return Verdict(UNKNOWN, "provider_error")
+
+        if payload.get("error"):
+            logger.warning("Verification provider error for %s: %s", address, payload["error"])
+            return Verdict(UNKNOWN, "provider_error")
+
+        verdict = _MILLIONVERIFIER_RESULTS.get(payload.get("result"))
+        if verdict is None:
+            logger.warning("Unrecognised provider result %r", payload.get("result"))
+            return Verdict(UNKNOWN, "provider_error")
+
+        # A confirmed shared inbox is real but still a poor thing to mail, so
+        # it is separated from a person's address rather than called good.
+        if verdict.status == DELIVERABLE and payload.get("role"):
+            return Verdict(RISKY, "role_account")
+        return verdict
+
+
+_PROVIDERS = {MillionVerifierProvider.name: MillionVerifierProvider}
+
+
+def get_provider(settings) -> MillionVerifierProvider | None:
+    """The configured mailbox-checking provider, or None for DNS-only.
+
+    Returns None when no key is set even if a provider is named: without
+    credentials it could only fail every address, and reporting everything
+    as `unknown` would be worse than honestly saying nothing was checked.
+    """
+    name = (settings.email_verify_provider or "mx").strip().lower()
+    if name == "mx":
+        return None
+    provider_cls = _PROVIDERS.get(name)
+    if provider_cls is None:
+        return None
+    if not settings.email_verify_api_key:
+        logger.warning("EMAIL_VERIFY_PROVIDER=%s is set but no API key is configured", name)
+        return None
+    return provider_cls(settings.email_verify_api_key)

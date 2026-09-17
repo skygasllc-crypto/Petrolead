@@ -17,7 +17,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # literal rather than imported from app.discovery.email_verification, because
 # the discovery modules import this one and the reverse would risk a cycle —
 # keep the two in step when an adapter is added.
-SUPPORTED_EMAIL_VERIFY_PROVIDERS = frozenset({"mx"})
+SUPPORTED_EMAIL_VERIFY_PROVIDERS = frozenset({"mx", "millionverifier"})
 
 
 class Settings(BaseSettings):

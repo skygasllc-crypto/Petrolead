@@ -72,7 +72,7 @@ PetroLead/
 │       ├── api/client.js          # Typed fetch wrapper for the backend API
 │       └── lib/constants.js       # Form option lists shared across pages
 │
-├── tests/                        # pytest suite (91 tests — see "Running Tests")
+├── tests/                        # pytest suite — see "Running Tests"
 ├── docker-compose.yml             # Postgres + Redis + backend + worker
 ├── Dockerfile                     # Backend/worker container image
 ├── requirements.txt / pyproject.toml
@@ -300,7 +300,7 @@ source venv/bin/activate
 python -m pytest tests/ -v
 ```
 
-348 tests, covering:
+The suite covers:
 
 - **Normalization** — corporate-suffix stripping, punctuation/case handling,
   domain extraction.
@@ -374,7 +374,7 @@ different server or Chromium.
 | `DELETE` | `/api/saved-searches/{id}` | Delete a saved search. |
 | `POST` | `/api/saved-searches/run-due` | Manually run whichever saved searches are currently due (no worker required). |
 | `POST` | `/api/contacts/bulk-lookup` | Look up to 25 people at once — each item is `{"url": "linkedin.com/in/..."}` or `{"full_name", "company_name"}`. **Preview only.** |
-| `POST` | `/api/emails/verify` | Email Verifier — body: `{"emails": [...]}` (up to 500). Grades each address `deliverable`/`undeliverable`/`risky`/`unknown` with a `reason`. Format, throwaway domains and known typos are decided locally; MX lookups are grouped by domain and run concurrently under a whole-batch budget; mailbox-level confirmation depends on `EMAIL_VERIFY_PROVIDER` (the default `mx` has none, so nothing is graded `deliverable`). No message is ever sent to the address. |
+| `POST` | `/api/emails/verify` | Email Verifier — body: `{"emails": [...]}` (up to 500). Grades each address `deliverable`/`undeliverable`/`risky`/`unknown` with a `reason`. Format, throwaway domains and known typos are decided locally; MX lookups are grouped by domain and run concurrently under a whole-batch budget; mailbox-level confirmation depends on `EMAIL_VERIFY_PROVIDER` — `mx` (the default) has none, so nothing is graded `deliverable`; `millionverifier` confirms each mailbox and maps catch-all domains and role inboxes to `risky` rather than rounding them up. No message is ever sent to the address. |
 | `GET` | `/api/billing/me` | The current user's plan, credit balance, renewal date, paid-until date, today's search count and plan limits. |
 | `GET` | `/api/billing/payment-methods` | Coins accepted for plans (those with a receiving address configured). |
 | `POST` | `/api/billing/orders` | Start paying for a plan — body: `plan`, `credits_per_month`, `billing_period` (`monthly`\|`yearly`), `currency` (`BTC`\|`USDT_TRC20`\|`TRX`). Returns the address and exact amount; the price comes from `app/services/plans.py`. |

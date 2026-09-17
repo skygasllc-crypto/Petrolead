@@ -19,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 import dns.resolver
 from bs4 import BeautifulSoup
 
+from app.config import Settings, get_settings
 from app.discovery import email_verification as verification
 
 logger = logging.getLogger("petrolead.discovery.emails")
@@ -154,7 +155,9 @@ async def verify_email(email: str) -> dict:
     return (await verify_emails([email]))[0]
 
 
-async def verify_emails(emails: list[str], *, timeout: float = 3.0) -> list[dict]:
+async def verify_emails(
+    emails: list[str], *, timeout: float = 3.0, settings: Settings | None = None
+) -> list[dict]:
     """Verify a batch of addresses, in input order — blank entries and
     case-insensitive duplicates are dropped (the first spelling wins).
 
@@ -185,6 +188,18 @@ async def verify_emails(emails: list[str], *, timeout: float = 3.0) -> list[dict
         screened = verification.screen(address)
         if screened is not None:
             settled[address] = screened
+
+    # A verification provider, when configured, answers the question DNS
+    # cannot: does this mailbox exist? It runs only on addresses that
+    # survived screening, so a typo never costs a paid API call.
+    provider = verification.get_provider(settings or get_settings())
+    if provider is not None:
+        pending = [a for a in addresses if a not in settled]
+        if pending:
+            try:
+                settled.update(await provider.verify(pending))
+            except Exception:  # noqa: BLE001 — a provider outage must not 500
+                logger.exception("Verification provider failed; falling back to DNS only")
 
     # One representative address per domain, for the addresses still open.
     representative: dict[str, str] = {}
