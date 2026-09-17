@@ -22,7 +22,6 @@ export default function Privacy() {
           for the information described here. Contact us at{" "}
           <a className="text-brand-600 hover:underline" href={`mailto:${SALES_EMAIL}`}>{SALES_EMAIL}</a>
           {" "}about anything on this page, including to exercise the rights in section 7.
-          {" "}<Fill>IF YOU HAVE A DATA PROTECTION OFFICER OR AN EU/UK REPRESENTATIVE, NAME THEM HERE</Fill>
         </p>
       </Section>
 
