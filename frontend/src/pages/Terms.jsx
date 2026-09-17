@@ -13,15 +13,15 @@ export default function Terms() {
   return (
     <LegalPage
       title="Terms of Service"
-      updated={20 October, 2026}
+      updated="20 October 2026"
       intro="These terms govern your use of PetroLead. By creating an account you agree to them."
     >
       <Section title="1. Who we are">
         <p>
-          PetroLead (&quot;we&quot;, &quot;us&quot;) is operated by <Fill>PETROL INVEsTMENT</Fill>,
-          registered in <Fill>Switzerland</Fill>
-          {" "}under company number <Fill>Sw-00896</Fill>. You can
-          reach us at <a className="text-brand-600 hover:underline" href={`mailto:${SALES_EMAIL}`}>{SALES_EMAIL}</a>.
+          PetroLead (&quot;we&quot;, &quot;us&quot;) is operated by PETROL INVESTMENT LLC, registered in
+          India under company number U05674DL1995PTC859805, at 352/1, MG Road, Gomti Nagar,
+          Lucknow &ndash; 226050, Uttar Pradesh, India. You can reach us at{" "}
+          <a className="text-brand-600 hover:underline" href={`mailto:${SALES_EMAIL}`}>{SALES_EMAIL}</a>.
         </p>
       </Section>
 
@@ -134,8 +134,8 @@ export default function Terms() {
         <p>
           To the fullest extent permitted by law, we are not liable for lost profits, lost business,
           lost or inaccurate data, or any indirect or consequential loss. Our total liability to you
-          for any claim is limited to the amount you paid us in the <Fill>12</Fill> months before the
-          claim arose.
+          for any claim is limited to the amount you paid us in the 12 months before the claim
+          arose.
         </p>
         <p>
           Nothing in these terms limits liability for death or personal injury caused by negligence,
@@ -160,8 +160,8 @@ export default function Terms() {
 
       <Section title="12. Governing law">
         <p>
-          These terms are governed by the law of <Fill>JURISDICTION</Fill>, and disputes will be
-          heard in the courts of <Fill>JURISDICTION</Fill>.
+          These terms are governed by the law of India, and disputes will be heard in the courts
+          of Lucknow, Uttar Pradesh.
         </p>
       </Section>
     </LegalPage>

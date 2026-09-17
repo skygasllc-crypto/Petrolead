@@ -12,12 +12,13 @@ export default function Privacy() {
   return (
     <LegalPage
       title="Privacy Policy"
-      updated={<Fill>DATE</Fill>}
+      updated="20 October 2026"
       intro="What PetroLead collects, why, and what you can ask us to do about it."
     >
       <Section title="1. Who controls your data">
         <p>
-          <Fill>LEGAL ENTITY NAME</Fill> of <Fill>REGISTERED ADDRESS</Fill> is the data controller
+          PETROL INVESTMENT LLC of 352/1, MG Road, Gomti Nagar, Lucknow &ndash; 226050, Uttar
+          Pradesh, India is the data controller
           for the information described here. Contact us at{" "}
           <a className="text-brand-600 hover:underline" href={`mailto:${SALES_EMAIL}`}>{SALES_EMAIL}</a>
           {" "}about anything on this page, including to exercise the rights in section 7.
@@ -84,7 +85,7 @@ export default function Privacy() {
         <List
           items={[
             <>
-              <Fill>HOSTING PROVIDER</Fill> — application hosting and the database.
+              Render — application hosting and the database.
             </>,
             <>
               <Fill>SEARCH PROVIDER</Fill> and <Fill>CONTACT-DATA PROVIDER</Fill> — receive search
@@ -122,7 +123,7 @@ export default function Privacy() {
           Depending on where you live, you can ask us to give you a copy of your data, correct it,
           delete it, restrict or object to how we use it, or send it to another provider. Email{" "}
           <a className="text-brand-600 hover:underline" href={`mailto:${SALES_EMAIL}`}>{SALES_EMAIL}</a>
-          {" "}and we will respond within <Fill>30</Fill> days. These rights apply whether or not you
+          {" "}and we will respond within 30 days. These rights apply whether or not you
           are a customer.
         </p>
         <p>
