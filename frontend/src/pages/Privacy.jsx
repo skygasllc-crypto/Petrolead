@@ -1,4 +1,4 @@
-import { LegalPage, Section, List, Fill } from "../components/marketing/LegalLayout";
+import { LegalPage, Section, List } from "../components/marketing/LegalLayout";
 import { SALES_EMAIL } from "../components/marketing/pricing";
 
 /* NOT LEGAL ADVICE. A starting draft describing what the software actually
@@ -86,14 +86,7 @@ export default function Privacy() {
             <>
               Render — application hosting and the database.
             </>,
-            <>
-              <Fill>SEARCH PROVIDER</Fill> and <Fill>CONTACT-DATA PROVIDER</Fill> — receive search
-              terms and company domains to return results.
-            </>,
-            <>
-              <Fill>EMAIL PROVIDER, IF SMTP IS CONFIGURED</Fill> — delivers account and payment
-              emails.
-            </>,
+            "Serper and Hunter — receive search terms and company domains to return results.",
             "CoinGecko — provides exchange rates. It receives no personal data.",
           ]}
         />
@@ -102,8 +95,8 @@ export default function Privacy() {
           permanent and outside our control.
         </p>
         <p>
-          Some providers are outside your country. Where data leaves the UK or EEA we rely on{" "}
-          <Fill>TRANSFER MECHANISM — e.g. standard contractual clauses</Fill>.
+          PetroLead is operated from India and hosted in the United States, so your data is
+          processed outside the UK and EEA.
         </p>
       </Section>
 
