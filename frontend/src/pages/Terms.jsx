@@ -86,9 +86,8 @@ export default function Terms() {
           ]}
         />
         <p>
-          Refunds: <Fill>STATE YOUR REFUND POLICY — e.g. paid periods are non-refundable once the
-          plan is activated, except where consumer law requires otherwise</Fill>. Nothing here
-          removes rights you have under the law of your country.
+          Refunds: paid periods are non-refundable once your subscription is activated.
+          Nothing here removes rights you have under the law of your country.
         </p>
       </Section>
 
