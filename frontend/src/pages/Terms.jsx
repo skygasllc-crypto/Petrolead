@@ -1,13 +1,10 @@
 import { Link } from "react-router-dom";
-import { LegalPage, Section, List, Fill } from "../components/marketing/LegalLayout";
+import { LegalPage, Section, List } from "../components/marketing/LegalLayout";
 import { SALES_EMAIL } from "../components/marketing/pricing";
 
-/* NOT LEGAL ADVICE. This is a starting draft written to match what the
-   software actually does — it has not been reviewed by a lawyer. Every
-   <Fill> below is a real decision (legal entity, jurisdiction, refund
-   policy) that only the operator can make, and they are highlighted on the
-   page so an unfinished version can't ship unnoticed. Have a lawyer review
-   this before taking money from the public. */
+/* NOT LEGAL ADVICE. Written to match what the software actually does, and
+   filled in with the operating company's real details — but not reviewed by
+   a lawyer. Have it reviewed before relying on it. */
 
 export default function Terms() {
   return (
