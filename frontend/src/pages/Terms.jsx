@@ -13,7 +13,7 @@ export default function Terms() {
   return (
     <LegalPage
       title="Terms of Service"
-      updated={20 October, 2026}
+      updated={<Fill></Fill>20 October, 2026</Fill>}
       intro="These terms govern your use of PetroLead. By creating an account you agree to them."
     >
       <Section title="1. Who we are">
