@@ -16,6 +16,7 @@ from app.config import get_settings
 from app.core.deps import get_current_user
 from app.database.connection import get_db
 from app.database.models import User
+from app.discovery import email_verification as verification
 from app.discovery.emails import verify_emails as verify_email_addresses
 from app.schemas import PaginatedEmailsSchema, VerifyEmailsRequestSchema, VerifyEmailsResponseSchema
 from app.services import billing_service, email_service
@@ -69,10 +70,30 @@ async def verify_emails(
     decided locally; whether a mailbox actually exists depends on
     `EMAIL_VERIFY_PROVIDER` — with the default (`mx`) only the domain is
     checked, so well-formed addresses come back `risky`, never
-    `deliverable`. Included in every plan; doesn't use credits.
+    `deliverable`.
+
+    One credit is spent per address a provider actually confirmed. Nothing
+    is charged for addresses settled locally (bad syntax, throwaway domain,
+    known typo), for domain-only grading, or for a call that failed — those
+    cost us nothing, so they cost the customer nothing.
     """
-    billing_service.require_plan(db, current_user)
-    results = await verify_email_addresses(payload.emails)
+    provider_active = verification.get_provider(get_settings()) is not None
+    if provider_active:
+        # Checked before running, so an empty balance can't ring up provider
+        # fees. What's actually spent is the count of answers received.
+        billing_service.require_credits(db, current_user)
+    else:
+        billing_service.require_plan(db, current_user)
+
+    batch = await verify_email_addresses(payload.emails)
+    results = batch.results
+    if batch.provider_checked:
+        billing_service.spend_credits(
+            db,
+            current_user,
+            batch.provider_checked,
+            f"Email Verifier: {batch.provider_checked} mailbox check(s)",
+        )
     counts = Counter(result["status"] for result in results)
     return VerifyEmailsResponseSchema(
         results=results,
@@ -80,7 +101,7 @@ async def verify_emails(
         undeliverable_count=counts["undeliverable"],
         risky_count=counts["risky"],
         unknown_count=counts["unknown"],
-        mailbox_checks_available=get_settings().email_verify_provider != "mx",
+        mailbox_checks_available=provider_active,
     )
 
 

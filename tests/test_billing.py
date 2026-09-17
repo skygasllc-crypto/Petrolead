@@ -16,6 +16,7 @@ from sqlalchemy import select
 from app.api import auth as auth_module
 from app.config import get_settings as real_get_settings
 from app.database.models import CreditTransaction, Subscription, utcnow
+from app.discovery import email_verification as verification
 from app.discovery import emails as emails_module
 from app.discovery import extractor as extractor_module
 from app.discovery.types import DiscoveredCompany
@@ -373,6 +374,127 @@ class TestSearchCredits:
 
         assert api.post("/api/discover", json={"limit": 10}, headers=member[1]).status_code == 200
         assert _billing(api, member[1])["credits_balance"] == 0
+
+
+def _fake_mx(results_by_domain):
+    """Answer MX lookups from a table, so these never touch real DNS."""
+
+    async def fake_validate_email_domain(email, *, timeout=3.0):
+        return results_by_domain[email.rsplit("@", 1)[-1]]
+
+    return fake_validate_email_domain
+
+
+class TestVerificationCredits:
+    """One credit per mailbox a provider actually confirms.
+
+    The first test is the important one: with no provider configured —
+    the default, and the live configuration — verification must stay free.
+    Charging there would bill customers for a DNS lookup that costs nothing.
+    """
+
+    @staticmethod
+    def _provider(monkeypatch, verdicts_by_address):
+        class FakeProvider:
+            async def verify(self, addresses):
+                return {a: verdicts_by_address[a] for a in addresses}
+
+        monkeypatch.setattr(verification, "get_provider", lambda settings: FakeProvider())
+
+    def test_without_a_provider_verification_is_free(self, api, admin, member, monkeypatch):
+        _assign(api, admin, member[0], "basic", 1000)
+        monkeypatch.setattr(
+            emails_module, "validate_email_domain", _fake_mx({"gulfstar.example": True})
+        )
+
+        response = api.post(
+            "/api/emails/verify",
+            json={"emails": ["jane@gulfstar.example", "bob@gulfstar.example"]},
+            headers=member[1],
+        )
+        assert response.status_code == 200
+        assert _billing(api, member[1])["credits_balance"] == 1000
+
+    def test_one_credit_per_confirmed_mailbox(self, api, admin, member, monkeypatch):
+        _assign(api, admin, member[0], "basic", 1000)
+        self._provider(
+            monkeypatch,
+            {
+                "jane@gulfstar.example": verification.Verdict(
+                    verification.DELIVERABLE, "mailbox_confirmed"
+                ),
+                "bob@gulfstar.example": verification.Verdict(
+                    verification.UNDELIVERABLE, "mailbox_not_found"
+                ),
+            },
+        )
+
+        response = api.post(
+            "/api/emails/verify",
+            json={"emails": ["jane@gulfstar.example", "bob@gulfstar.example"]},
+            headers=member[1],
+        )
+        assert response.status_code == 200
+        # Both were answered — a rejection is as valuable as a confirmation.
+        assert _billing(api, member[1])["credits_balance"] == 998
+
+    def test_locally_screened_addresses_are_free(self, api, admin, member, monkeypatch):
+        """A typo or throwaway domain never reaches the provider, so it
+        costs us nothing and must cost the customer nothing."""
+        _assign(api, admin, member[0], "basic", 1000)
+        self._provider(monkeypatch, {})
+
+        response = api.post(
+            "/api/emails/verify",
+            json={"emails": ["someone@mailinator.com", "jane@gmial.com", "not-an-email"]},
+            headers=member[1],
+        )
+        assert response.status_code == 200
+        assert _billing(api, member[1])["credits_balance"] == 1000
+
+    def test_a_failed_provider_call_is_not_charged(self, api, admin, member, monkeypatch):
+        _assign(api, admin, member[0], "basic", 1000)
+        self._provider(
+            monkeypatch,
+            {
+                "jane@gulfstar.example": verification.Verdict(
+                    verification.UNKNOWN, "provider_error"
+                )
+            },
+        )
+        monkeypatch.setattr(
+            emails_module, "validate_email_domain", _fake_mx({"gulfstar.example": True})
+        )
+
+        response = api.post(
+            "/api/emails/verify",
+            json={"emails": ["jane@gulfstar.example"]},
+            headers=member[1],
+        )
+        assert response.status_code == 200
+        assert _billing(api, member[1])["credits_balance"] == 1000
+
+    def test_an_empty_balance_is_refused_before_the_provider_runs(
+        self, api, admin, member, monkeypatch
+    ):
+        _assign(api, admin, member[0], "basic", 1000)
+        _adjust(api, admin, member[0], -1000)
+        called = []
+
+        class FakeProvider:
+            async def verify(self, addresses):
+                called.append(addresses)
+                return {}
+
+        monkeypatch.setattr(verification, "get_provider", lambda settings: FakeProvider())
+
+        response = api.post(
+            "/api/emails/verify",
+            json={"emails": ["jane@gulfstar.example"]},
+            headers=member[1],
+        )
+        assert response.status_code == 402
+        assert called == [], "an empty balance must not ring up provider fees"
 
 
 class TestPlanLimits:

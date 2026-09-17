@@ -51,6 +51,21 @@ class Verdict:
     reason: str
 
 
+@dataclass(frozen=True)
+class VerificationBatch:
+    """Graded addresses, plus how many cost a provider call.
+
+    `provider_checked` is what the customer is billed for, so it is counted
+    explicitly rather than inferred from the reasons: `role_account` can come
+    from local screening or from a provider downgrade, and the two are
+    indistinguishable afterwards. Failed calls are excluded — no answer, no
+    charge.
+    """
+
+    results: list[dict]
+    provider_checked: int
+
+
 # Free, throwaway mailboxes: mail sent to them is pointless even when it is
 # technically delivered. A starter list — extend it as you meet new ones.
 DISPOSABLE_DOMAINS = frozenset(

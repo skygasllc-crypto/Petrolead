@@ -100,6 +100,7 @@ export const COMPARISON = [
       { label: "Name + company lookup", values: [true, true, true] },
       { label: "Email Extractor (company websites)", values: [true, true, true] },
       { label: "Email Verifier (up to 500 per check)", values: [true, true, true] },
+      { label: "Mailbox confirmation — 1 credit each", values: [true, true, true] },
       { label: "Email validity labels", values: [true, true, true] },
       { label: "Lead scoring", values: [true, true, true] },
     ],
@@ -132,7 +133,7 @@ export const PRICING_FAQS = [
   },
   {
     q: "When do I use credits?",
-    a: "Only when an email is found. A lookup — or a search result — that comes back without a business email doesn't use a credit, so you only pay for contacts you can actually use.",
+    a: "Only when an email is found. A lookup — or a search result — that comes back without a business email doesn't use a credit, so you only pay for contacts you can actually use. In the Email Verifier, one credit covers confirming one mailbox; addresses rejected on format, a throwaway domain or an obvious typo are free.",
   },
   {
     q: "Do unused credits roll over?",

@@ -152,12 +152,12 @@ async def verify_email(email: str) -> dict:
     """
     # Delegates to the batch path so the grading rules live in one place —
     # two copies of "is this deliverable?" would drift apart.
-    return (await verify_emails([email]))[0]
+    return (await verify_emails([email])).results[0]
 
 
 async def verify_emails(
     emails: list[str], *, timeout: float = 3.0, settings: Settings | None = None
-) -> list[dict]:
+) -> verification.VerificationBatch:
     """Verify a batch of addresses, in input order — blank entries and
     case-insensitive duplicates are dropped (the first spelling wins).
 
@@ -192,6 +192,7 @@ async def verify_emails(
     # A verification provider, when configured, answers the question DNS
     # cannot: does this mailbox exist? It runs only on addresses that
     # survived screening, so a typo never costs a paid API call.
+    provider_checked = 0
     provider = verification.get_provider(settings or get_settings())
     if provider is not None:
         pending = [a for a in addresses if a not in settled]
@@ -205,9 +206,13 @@ async def verify_emails(
                 # is not a verdict. Leaving those out lets the DNS check below
                 # still run, so an outage degrades to domain-only grading
                 # rather than reporting every address as uncheckable.
-                settled.update(
-                    {a: v for a, v in verdicts.items() if v.status != verification.UNKNOWN}
-                )
+                answered = {
+                    a: v for a, v in verdicts.items() if v.status != verification.UNKNOWN
+                }
+                settled.update(answered)
+                # Only answered addresses are billable: a failed call gave us
+                # nothing, and the DNS check below will cover it for free.
+                provider_checked = len(answered)
 
     # One representative address per domain, for the addresses still open.
     representative: dict[str, str] = {}
@@ -271,4 +276,4 @@ async def verify_emails(
                 "domain_accepts_mail": accepts,
             }
         )
-    return results
+    return verification.VerificationBatch(results=results, provider_checked=provider_checked)
