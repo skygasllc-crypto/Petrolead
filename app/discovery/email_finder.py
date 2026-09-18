@@ -109,6 +109,12 @@ async def _find_via_prospeo(*, domain: str, full_name: str, settings: Settings) 
             # Not a missing person — the integration itself has stopped
             # working, and every lookup will fail until it's dealt with.
             logger.error("Prospeo rejected the request: %s", code)
+        elif code != "NO_MATCH":
+            # INVALID_DATAPOINTS, INVALID_REQUEST, INTERNAL_ERROR, a rate
+            # limit: all mean the request we sent was unusable, not that
+            # the person couldn't be found. Staying silent would make a
+            # broken integration look exactly like an honest miss.
+            logger.warning("Prospeo could not process the request: %s", code)
         return None
 
     email_block = ((data.get("person") or {}).get("email")) or {}

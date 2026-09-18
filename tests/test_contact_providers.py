@@ -82,13 +82,55 @@ class TestProspeo:
         )
 
     async def test_no_match_is_quiet(self, monkeypatch):
-        _prospeo_returns(monkeypatch, {"error": True, "error_code": "NO_MATCH"})
-        assert (
-            await find_person_email(
+        """A person Prospeo doesn't know is ordinary business. It must not
+        log, or a real fault would be buried in the noise of normal misses."""
+        records = []
+
+        class Capture(logging.Handler):
+            def emit(self, record):
+                records.append(record)
+
+        handler = Capture(level=logging.DEBUG)
+        email_finder.logger.addHandler(handler)
+        try:
+            _prospeo_returns(monkeypatch, {"error": True, "error_code": "NO_MATCH"})
+            result = await find_person_email(
                 domain="gulfstar.example", full_name="Jane Doe", settings=PROSPEO
             )
-            is None
+        finally:
+            email_finder.logger.removeHandler(handler)
+
+        assert result is None
+        assert records == [], (
+            f"NO_MATCH should log nothing, got {[r.getMessage() for r in records]}"
         )
+
+    @pytest.mark.parametrize(
+        "code", ["INVALID_DATAPOINTS", "INVALID_REQUEST", "INTERNAL_ERROR", "Rate limit exceeded"]
+    )
+    async def test_an_unusable_request_is_logged_not_swallowed(self, monkeypatch, code):
+        """These mean Prospeo couldn't use what we sent — a broken
+        integration, not a missing person. Swallowed, they look identical
+        to NO_MATCH and the real fault stays invisible."""
+        records = []
+
+        class Capture(logging.Handler):
+            def emit(self, record):
+                records.append(record)
+
+        handler = Capture(level=logging.WARNING)
+        email_finder.logger.addHandler(handler)
+        try:
+            _prospeo_returns(monkeypatch, {"error": True, "error_code": code})
+            result = await find_person_email(
+                domain="gulfstar.example", full_name="Jane Doe", settings=PROSPEO
+            )
+        finally:
+            email_finder.logger.removeHandler(handler)
+
+        assert result is None
+        assert [r for r in records if r.levelno >= logging.WARNING], "no WARNING was logged"
+        assert code in records[0].getMessage()
 
     @pytest.mark.parametrize("code", ["INVALID_API_KEY", "INSUFFICIENT_CREDITS"])
     async def test_account_failures_are_logged_as_errors(self, monkeypatch, code):
