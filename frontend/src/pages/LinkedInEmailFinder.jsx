@@ -210,7 +210,7 @@ function BulkLookupMock() {
           <div>linkedin.com/in/diego-morales</div>
           <div>linkedin.com/in/j-smith-energy</div>
         </div>
-        <div className="mt-4 text-[11px] text-ink-700">3 of 4 found</div>
+        <div className="mt-4 text-[11px] text-ink-700">4 contacts · 3 with a business email</div>
         <div className="mt-2 flex flex-col gap-2">
           {rows.map(([name, company, email, status]) => (
             <div
@@ -227,9 +227,11 @@ function BulkLookupMock() {
               <StatusPill status={status} />
             </div>
           ))}
-          <div className="rounded-lg border border-status-danger/30 bg-status-danger/5 px-3 py-2.5 text-[11px]">
+          <div className="rounded-lg border border-base-700 bg-base-900 px-3 py-2.5 text-[11px]">
             <span className="text-ink-500">linkedin.com/in/j-smith-energy</span>
-            <span className="mt-0.5 block text-status-danger">No business email found — skipped</span>
+            <span className="mt-0.5 block text-ink-700">
+              Contact found — no business email, no credit spent
+            </span>
           </div>
         </div>
       </div>

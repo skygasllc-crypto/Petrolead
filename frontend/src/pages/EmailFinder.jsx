@@ -583,8 +583,13 @@ function BulkPanel() {
         lookup={lookup}
         render={(results) => (
           <div>
+            {/* Contacts and emails are counted separately: a lookup now
+                succeeds without an email, so one number would overstate
+                what was actually found. */}
             <div className="text-sm font-semibold text-ink-100">
-              {results.filter((r) => r.success).length} of {results.length} found
+              {results.filter((r) => r.success).length} of {results.length} contacts ·{" "}
+              {results.filter((r) => r.success && r.preview.emails.length > 0).length} with a
+              business email
             </div>
             <ul className="mt-3 flex flex-col gap-2">
               {results.map((result, index) => (
