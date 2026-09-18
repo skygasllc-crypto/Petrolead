@@ -70,6 +70,14 @@ services:
         sync: false
       - key: HUNTER_IO_API_KEY
         sync: false
+      # Which service resolves a person's business email: "hunter" (default)
+      # or "prospeo", each with its own key. An unrecognised name stops the
+      # service at startup rather than silently finding no emails at all —
+      # so a typo here is a failed deploy, by design.
+      - key: CONTACT_PROVIDER
+        sync: false
+      - key: PROSPEO_API_KEY
+        sync: false
       # PUBLIC receiving addresses only. Never a private key or seed phrase.
       - key: CRYPTO_BTC_ADDRESS
         sync: false
@@ -94,7 +102,18 @@ services:
     name: petrolead-worker
     runtime: docker
     plan: starter
-    dockerCommand: celery -A app.worker worker --beat --loglevel=info
+    # --concurrency=1 is not a tuning preference, it's what fits: Celery's
+    # prefork pool forks one child per CPU core by default, and each child
+    # carries the whole discovery import graph (lxml, BeautifulSoup,
+    # SQLAlchemy) at ~76MB resident. On a 4-core starter instance that is
+    # ~380MB before any work happens, and the 512MB limit is hit as soon as
+    # a search starts parsing pages. One child is ample for a task that runs
+    # every 15 minutes. --max-tasks-per-child=1 recycles that child after
+    # each run so page-parsing memory is returned to the OS rather than held
+    # until the next one.
+    dockerCommand: >-
+      celery -A app.worker worker --beat --loglevel=info
+      --concurrency=1 --max-tasks-per-child=1
     envVars:
       - key: APP_ENV
         value: production
@@ -122,6 +141,12 @@ services:
       - key: SEARCHAPI_IO_API_KEY
         sync: false
       - key: HUNTER_IO_API_KEY
+        sync: false
+      # Keep in step with the API: the worker runs the same discovery
+      # pipeline, so it resolves emails through the same provider.
+      - key: CONTACT_PROVIDER
+        sync: false
+      - key: PROSPEO_API_KEY
         sync: false
 
   - type: web
