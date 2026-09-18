@@ -97,6 +97,24 @@ class TestResultMapping:
         assert verdicts["a@x.example"].status == "unknown"
 
 
+class TestEndpoint:
+    """The one thing the stubbed tests below cannot check.
+
+    Every other test in this file replaces httpx entirely, so the URL is
+    never exercised — which is how a wrong one survived: the API answers
+    301 to the slashed path, httpx does not follow redirects by default,
+    and the failure surfaced as `unknown` for every address. Verification
+    silently confirmed nothing and graded everything risky, on live
+    addresses that were perfectly good.
+    """
+
+    def test_the_url_keeps_its_trailing_slash(self):
+        assert verification.MILLIONVERIFIER_URL.endswith("/v3/"), (
+            "Without the trailing slash the API redirects and no address is "
+            "ever confirmed."
+        )
+
+
 class TestFailureHandling:
     async def test_a_network_error_marks_only_that_address_unknown(self, monkeypatch):
         _responder(

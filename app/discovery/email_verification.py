@@ -181,7 +181,12 @@ def grade_domain_only(address: str) -> Verdict:
 
 # --- Providers ------------------------------------------------------------
 
-MILLIONVERIFIER_URL = "https://api.millionverifier.com/api/v3"
+# The trailing slash is required. Without it the API answers 301 to the
+# slashed path, and httpx does not follow redirects by default: the 3xx
+# passes raise_for_status(), then .json() fails on the redirect body, so
+# every address came back `unknown` and fell through to the DNS-only
+# check. Nothing was ever confirmed and everything graded risky.
+MILLIONVERIFIER_URL = "https://api.millionverifier.com/api/v3/"
 # Their per-address timeout, in seconds. Their API accepts 2-60.
 PROVIDER_TIMEOUT_SECONDS = 20
 # Addresses are checked one request each, so cap how many run at once.
