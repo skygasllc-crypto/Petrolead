@@ -149,14 +149,50 @@ class Settings(BaseSettings):
     # --- Logging ---
     log_level: str = "INFO"
 
-    @field_validator("docs_enabled", "email_verify_api_key", "prospeo_api_key", mode="before")
+    @field_validator(
+        "docs_enabled",
+        "email_verify_api_key",
+        "prospeo_api_key",
+        "hunter_io_api_key",
+        "google_cse_api_key",
+        "google_cse_engine_id",
+        "bing_search_api_key",
+        "serpapi_api_key",
+        "searchapi_io_api_key",
+        "serper_api_key",
+        "coingecko_api_key",
+        "smtp_username",
+        "smtp_password",
+        "crypto_btc_address",
+        "crypto_usdt_trc20_address",
+        "crypto_trx_address",
+        mode="before",
+    )
     @classmethod
-    def empty_string_means_unset(cls, value: object) -> object:
+    def blank_or_placeholder_means_unset(cls, value: object) -> object:
         """A variable set to nothing — `DOCS_ENABLED=` in a copied .env, or an
         empty field in a platform dashboard — means "not configured". Treat it
         as unset, rather than refusing to start on an unparseable bool or
-        handing a provider an empty string as its API key."""
-        if isinstance(value, str) and not value.strip():
+        handing a provider an empty string as its API key.
+
+        The same goes for a value still wrapped in angle brackets. Every
+        placeholder in .env.example and the docs is written `<like this>`, and
+        pasting one whole is an easy mistake with an expensive, silent
+        failure: a verification key set to `<your-key>` is refused by the
+        provider, every address falls back to the DNS-only check, and the
+        customer is told their good addresses are risky. Treated as unset it
+        is visible instead — the startup line logs `key=unset` and the
+        verifier page says no provider is configured.
+
+        It matters most for the wallet addresses, where a placeholder would
+        be shown at checkout and a customer could send real money to it.
+        """
+        if not isinstance(value, str):
+            return value
+        text = value.strip()
+        if not text:
+            return None
+        if text.startswith("<") and text.endswith(">"):
             return None
         return value
 
