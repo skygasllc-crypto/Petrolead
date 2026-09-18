@@ -6,6 +6,11 @@ export const MAX_VERIFY_EMAILS = 500;
 // it means we could not establish that the mailbox exists.
 export const SAFE_TO_SEND = "deliverable";
 
+// Reasons that mean "shared inbox, not a person". A confirmed one is
+// deliverable — it won't bounce — but it's still worth showing apart from a
+// named person's address, so the two reasons share one marker.
+export const SHARED_INBOX_REASONS = new Set(["role_account", "role_confirmed"]);
+
 export const EMAIL_CHECK_STATUS = {
   deliverable: {
     label: "Deliverable",
@@ -39,7 +44,8 @@ export const EMAIL_CHECK_REASON = {
   typo_suspected: "The domain looks like a misspelling of a common provider.",
   mailbox_not_found: "The mail server said this mailbox doesn't exist.",
   catch_all: "The domain accepts every address, so this one can't be confirmed.",
-  role_account: "A shared inbox (info@, sales@) rather than a person.",
+  role_account: "A shared inbox (info@, sales@) — the mailbox itself wasn't checked.",
+  role_confirmed: "A shared inbox (info@, sales@). The mail server accepted it.",
   domain_only: "The domain accepts mail, but the mailbox itself wasn't checked.",
   dns_error: "The domain's mail servers couldn't be reached right now.",
   provider_error: "The verification service couldn't be reached right now.",

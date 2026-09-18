@@ -419,8 +419,13 @@ class VerifiedEmailSchema(BaseModel):
 
     `status` answers "will this bounce?" and `reason` says why. Only
     `deliverable` is safe to send to — `risky` covers catch-all domains,
-    shared role inboxes and (without a verification provider configured)
-    addresses where only the domain could be checked.
+    unconfirmed shared role inboxes and (without a verification provider
+    configured) addresses where only the domain could be checked.
+
+    A shared inbox a provider has confirmed is `deliverable` with reason
+    `role_confirmed`: it will not bounce, which is what this grades.
+    Whether it's a good address to cold-mail is a separate question, and
+    the reason is what answers it.
     """
 
     email: str
@@ -434,6 +439,7 @@ class VerifiedEmailSchema(BaseModel):
         "mailbox_not_found",
         "catch_all",
         "role_account",
+        "role_confirmed",
         "domain_only",
         "dns_error",
         "provider_error",

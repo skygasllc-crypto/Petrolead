@@ -152,7 +152,11 @@ class TestVerifyEmailsEndpoint:
         assert [r["status"] for r in results] == ["undeliverable", "undeliverable"]
         assert [r["reason"] for r in results] == ["disposable_domain", "typo_suspected"]
 
-    def test_shared_inboxes_are_flagged_as_role_accounts(self, client, monkeypatch):
+    def test_unconfirmed_shared_inboxes_stay_risky(self, client, monkeypatch):
+        """No provider is configured here, so nothing checked the mailbox.
+        A confirmed shared inbox IS deliverable (see the provider tests) —
+        but only once something confirmed it. This is the unconfirmed case
+        and it must stay risky."""
         monkeypatch.setattr(
             emails_module, "validate_email_domain", _fake_mx({"gulfstar.example": True})
         )

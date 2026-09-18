@@ -16,7 +16,11 @@ import pytest
 
 from app.config import Settings
 from app.discovery import email_verification as verification
-from app.discovery.email_verification import MillionVerifierProvider, get_provider
+from app.discovery.email_verification import (
+    MillionVerifierProvider,
+    get_provider,
+    grade_domain_only,
+)
 
 KEY = "test-key-not-a-real-one"
 
@@ -63,11 +67,29 @@ class TestResultMapping:
         verdicts = await MillionVerifierProvider(KEY).verify(["a@x.example"])
         assert verdicts["a@x.example"].status != "deliverable"
 
-    async def test_a_confirmed_role_inbox_is_downgraded(self, monkeypatch):
+    async def test_a_confirmed_role_inbox_is_deliverable_but_marked(self, monkeypatch):
+        """It will not bounce, and not bouncing is what this grades. The
+        reason still says it's a shared inbox, so the caller can tell it
+        apart from a named person without it being withheld as risky."""
         _responder(monkeypatch, {"info@x.example": {"result": "ok", "role": True}})
         verdicts = await MillionVerifierProvider(KEY).verify(["info@x.example"])
-        assert verdicts["info@x.example"].status == "risky"
-        assert verdicts["info@x.example"].reason == "role_account"
+        assert verdicts["info@x.example"].status == "deliverable"
+        assert verdicts["info@x.example"].reason == "role_confirmed"
+
+    async def test_an_unconfirmed_role_inbox_stays_risky(self):
+        """The counterpart to the test above, and the line that must not
+        blur: without a provider confirming it, nothing established that
+        the mailbox exists, so a role address is still only risky."""
+        verdict = grade_domain_only("info@x.example")
+        assert verdict.status == "risky"
+        assert verdict.reason == "role_account"
+
+    async def test_a_role_inbox_the_provider_calls_invalid_is_not_rescued(self, monkeypatch):
+        """The role flag only ever softens a verdict that was already
+        deliverable. An address the server rejects stays undeliverable."""
+        _responder(monkeypatch, {"info@x.example": {"result": "invalid", "role": True}})
+        verdicts = await MillionVerifierProvider(KEY).verify(["info@x.example"])
+        assert verdicts["info@x.example"].status == "undeliverable"
 
     async def test_an_unrecognised_result_is_unknown_not_deliverable(self, monkeypatch):
         _responder(monkeypatch, {"a@x.example": {"result": "something_new"}})

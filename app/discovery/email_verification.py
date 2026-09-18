@@ -56,8 +56,8 @@ class VerificationBatch:
     """Graded addresses, plus how many cost a provider call.
 
     `provider_checked` is what the customer is billed for, so it is counted
-    explicitly rather than inferred from the reasons: `role_account` can come
-    from local screening or from a provider downgrade, and the two are
+    explicitly rather than inferred from the reasons: `disposable_domain` can
+    come from local screening or from a provider, and the two are
     indistinguishable afterwards. Failed calls are excluded — no answer, no
     charge.
     """
@@ -253,10 +253,14 @@ class MillionVerifierProvider:
             logger.warning("Unrecognised provider result %r", payload.get("result"))
             return Verdict(UNKNOWN, "provider_error")
 
-        # A confirmed shared inbox is real but still a poor thing to mail, so
-        # it is separated from a person's address rather than called good.
+        # A confirmed shared inbox will not bounce, and not bouncing is what
+        # this grading measures. Calling it risky conflated deliverability
+        # with whether it's a good address to cold-mail — a separate
+        # question, and one the caller can answer from the reason, which
+        # marks it as shared. An *unconfirmed* role address is still risky
+        # (see `grade_domain_only`): nothing established that it exists.
         if verdict.status == DELIVERABLE and payload.get("role"):
-            return Verdict(RISKY, "role_account")
+            return Verdict(DELIVERABLE, "role_confirmed")
         return verdict
 
 

@@ -7,6 +7,7 @@ import {
   EMAIL_CHECK_STATUS,
   MAX_VERIFY_EMAILS,
   SAFE_TO_SEND,
+  SHARED_INBOX_REASONS,
 } from "../lib/emailChecks";
 
 function parseEmails(text) {
@@ -182,7 +183,17 @@ export default function EmailVerifier() {
                     <tr key={r.email} className="border-t border-base-700">
                       <td className="px-5 py-3 font-medium text-ink-100">{r.email}</td>
                       <td className="px-3 py-3">
-                        <EmailCheckBadge status={r.status} />
+                        {/* A confirmed shared inbox is deliverable, but it is
+                            still not a person — the marker keeps that visible
+                            without withholding the address. */}
+                        <span className="flex flex-wrap items-center gap-1.5">
+                          <EmailCheckBadge status={r.status} />
+                          {SHARED_INBOX_REASONS.has(r.reason) && (
+                            <span className="whitespace-nowrap rounded-full border border-base-600 px-2 py-0.5 text-xs font-medium text-ink-500">
+                              Shared inbox
+                            </span>
+                          )}
+                        </span>
                       </td>
                       <td className="px-5 py-3 text-ink-500">
                         {/* The reason is the useful part — why it will bounce,
