@@ -695,24 +695,6 @@ async def _resolve_domain_and_email(
     return domain, ([found] if found else [])
 
 
-def _require_email(
-    provider, settings, emails: list[dict], *, domain: str | None, full_name: str, company_name: str
-) -> None:
-    """A person lookup exists to find an email — a contact without one is
-    not a result. Raises `UrlLookupError` explaining which step came up
-    empty. Mock mode is exempt: it never looks up (or fabricates) emails,
-    so requiring one would make every offline lookup fail."""
-    if emails or provider.name == "mock":
-        return
-    if not settings.hunter_io_api_key:
-        reason = "email lookup isn't configured (HUNTER_IO_API_KEY is not set)"
-    elif not domain:
-        reason = f"no official website could be found for {company_name} to look it up against"
-    else:
-        reason = f"Hunter.io had no confident match at {domain}"
-    raise UrlLookupError(f"No business email found for {full_name} — {reason}. Skipped.")
-
-
 async def _preview_from_profile_snippet(
     db: Session, url: str, *, platform: str, owner_id: str
 ) -> dict:
@@ -722,10 +704,15 @@ async def _preview_from_profile_snippet(
     exact URL (same trust model as `SocialSource`), and parse a
     name/title/company out of it if there is one.
 
-    Only succeeds when a company can be identified — without one, there's
-    nowhere meaningful to attach the person's name/title (this app has no
-    standalone "person" record, only companies with an optional named
-    contact), so it fails the same way an unfetchable page does.
+    The person is returned even when the listing names no employer and even
+    when no business email could be found: knowing who someone is and where
+    their profile lives is worth showing, and a lookup that found nothing
+    billable costs the customer nothing (see `api/companies.py` — credits
+    are spent only on an email that was actually found). A contact without
+    a company is preview-only: `companies.company_name` is NOT NULL, so it
+    can't be saved until the user names an employer.
+
+    Fails only when the profile has no usable public listing at all.
     """
     settings = get_settings()
     provider = get_search_provider(settings)
@@ -740,24 +727,21 @@ async def _preview_from_profile_snippet(
         logger.warning("Profile snippet lookup failed for url=%r", url, exc_info=True)
         results = []
 
+    # Prefer a listing that names an employer, but keep the first name-only
+    # parse rather than discarding it: a contact with no company is still a
+    # result, just one that can't be enriched any further.
     parsed = None
-    found_name = None
     for result in results:
-        parsed = parse_profile_snippet(result.title, result.snippet)
-        if parsed and parsed.company_name:
+        candidate_parse = parse_profile_snippet(result.title, result.snippet)
+        if candidate_parse is None:
+            continue
+        if candidate_parse.company_name:
+            parsed = candidate_parse
             break
-        if parsed and found_name is None:
-            found_name = parsed.name
-        parsed = None
+        if parsed is None:
+            parsed = candidate_parse
 
     if parsed is None:
-        if found_name:
-            raise UrlLookupError(
-                f"Found this LinkedIn profile ({found_name}), but its public search "
-                "listing doesn't name a current employer, so there's no company to "
-                "attach them to. If you know where they work, enter "
-                '"Full Name, Company Name" in Bulk Contact Lookup instead.'
-            )
         raise UrlLookupError(
             "No public search listing was found for this LinkedIn profile. "
             "LinkedIn profiles are login-gated and never fetched directly — only "
@@ -765,17 +749,14 @@ async def _preview_from_profile_snippet(
             'work, enter "Full Name, Company Name" in Bulk Contact Lookup instead.'
         )
 
-    domain, emails = await _resolve_domain_and_email(
-        provider, settings, company_name=parsed.company_name, full_name=parsed.name
-    )
-    _require_email(
-        provider,
-        settings,
-        emails,
-        domain=domain,
-        full_name=parsed.name,
-        company_name=parsed.company_name,
-    )
+    # No employer means no domain to look an email up against, so the
+    # enrichment is skipped entirely rather than searched for in vain.
+    domain: str | None = None
+    emails: list[dict] = []
+    if parsed.company_name:
+        domain, emails = await _resolve_domain_and_email(
+            provider, settings, company_name=parsed.company_name, full_name=parsed.name
+        )
 
     candidate = DiscoveredCompany(
         company_name=parsed.company_name,
@@ -803,16 +784,13 @@ async def _preview_from_name_and_company(
 ) -> dict:
     """Bulk-lookup path for an item given as a plain name + company (no
     profile URL to derive them from) — goes straight to the same
-    domain-resolution + Hunter.io enrichment the profile-snippet fallback
-    uses. Fails (via `_require_email`) when no email could be found, same as
-    the URL-based path."""
+    domain-resolution + email enrichment the profile-snippet fallback uses.
+    Returns the contact even when no email was found — the customer is
+    charged only for an email that actually turned up."""
     settings = get_settings()
     provider = get_search_provider(settings)
     domain, emails = await _resolve_domain_and_email(
         provider, settings, company_name=company_name, full_name=full_name
-    )
-    _require_email(
-        provider, settings, emails, domain=domain, full_name=full_name, company_name=company_name
     )
 
     candidate = DiscoveredCompany(

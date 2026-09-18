@@ -25,6 +25,12 @@ _LINKEDIN_PERSONAL_RE = re.compile(
 # with the headline itself often "{Title} at {Company}". Trailing separator
 # + platform name is stripped first; " - " then splits name / headline.
 _TRAILING_PLATFORM_RE = re.compile(r"\s*[|\-–—]\s*linkedin\s*$", re.IGNORECASE)
+# Segments are separated by a dash or a pipe. LinkedIn's indexed titles use
+# a hyphen, an en-dash or an em-dash interchangeably, so matching only " - "
+# left an en-dash title unsplit and treated the whole headline as the
+# person's name. A dash must be surrounded by whitespace so a hyphenated
+# name ("Jean-Luc") is never split.
+_SEGMENT_SPLIT_RE = re.compile(r"\s+[-–—]\s+|\s*\|\s*")
 _TITLE_AT_COMPANY_RE = re.compile(r"^(?P<title>.+?)\s+at\s+(?P<company>.+)$", re.IGNORECASE)
 # Search engines cut long titles/snippets off with an ellipsis — a company
 # name that ends in one is incomplete and must not be reported.
@@ -86,7 +92,7 @@ def parse_profile_snippet(raw_title: str, snippet: str = "") -> ParsedProfile | 
     if not text:
         return None
 
-    segments = [s.strip() for s in text.split(" - ") if s.strip()]
+    segments = [s.strip() for s in _SEGMENT_SPLIT_RE.split(text) if s.strip()]
     if not segments:
         return None
 

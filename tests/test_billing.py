@@ -246,8 +246,12 @@ class TestEmailCredits:
         _fake_person_lookups(monkeypatch, emails_for=lambda name: False)
         _assign(api, admin, member[0], "basic", 1000)
 
+        # The contact is still returned — only the email is missing, and an
+        # email is the only thing a credit pays for.
         response = api.post("/api/discover-url", json={"url": PROFILE_URL}, headers=member[1])
-        assert response.status_code == 422
+        assert response.status_code == 200
+        assert response.json()["contact_person_name"]
+        assert response.json()["emails"] == []
         assert _billing(api, member[1])["credits_balance"] == 1000
 
     def test_website_extraction_is_free(self, api, admin, member, monkeypatch):
@@ -310,7 +314,11 @@ class TestEmailCredits:
         ]
         response = api.post("/api/contacts/bulk-lookup", json={"items": items}, headers=member[1])
         assert response.status_code == 200
-        assert response.json()["succeeded_count"] == 1
+        # All three people come back; only Jane's lookup found an email, so
+        # only Jane's costs a credit.
+        body = response.json()
+        assert body["succeeded_count"] == 3
+        assert [len(r["preview"]["emails"]) for r in body["results"]] == [1, 0, 0]
         assert _billing(api, member[1])["credits_balance"] == 1999
 
     def test_bulk_lookup_needs_a_credit_for_every_line(self, api, admin, member):

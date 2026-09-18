@@ -183,10 +183,13 @@ class _FakeRealProvider:
 
 
 class TestProfileSnippetFailureMessages:
-    """A profile lookup that can't identify a company says why, instead of
-    the generic "could not fetch this page" message."""
+    """A profile lookup fails only when there's no usable public listing at
+    all. A person whose listing names no employer is still a result."""
 
-    def test_profile_found_without_employer_names_the_person(self, client, monkeypatch):
+    def test_profile_found_without_employer_still_returns_the_person(self, client, monkeypatch):
+        """The listing names no current employer, so there's no company and
+        no domain to find an email against — but the customer still gets who
+        the person is, and is charged nothing for it."""
         fake_provider = _FakeRealProvider(
             snippet_title="Bill Gates - Chair, Gates Foundation and Founder, Breakthrough ...",
             website_url=None,
@@ -196,11 +199,14 @@ class TestProfileSnippetFailureMessages:
         response = client.post(
             "/api/discover-url", json={"url": "https://www.linkedin.com/in/williamhgates"}
         )
-        assert response.status_code == 422
-        detail = response.json()["detail"]
-        assert "Bill Gates" in detail
-        assert "doesn't name a current employer" in detail
-        assert "Bulk Contact Lookup" in detail
+        assert response.status_code == 200
+        body = response.json()
+        assert body["contact_person_name"] == "Bill Gates"
+        assert body["company_name"] is None
+        assert body["emails"] == []
+        assert body["social_profiles"] == [
+            {"platform": "linkedin", "url": "https://www.linkedin.com/in/williamhgates"}
+        ]
 
     def test_profile_with_no_search_listing(self, client, monkeypatch):
         class _NoResults(_FakeRealProvider):
@@ -248,7 +254,10 @@ class TestProfileSnippetEmailEnrichment:
             {"email": "michael.jones@falconpetro.example", "is_valid": True}
         ]
 
-    def test_no_email_when_hunter_has_no_confident_match(self, client, monkeypatch):
+    def test_contact_is_returned_even_when_no_email_matches(self, client, monkeypatch):
+        """The provider had no confident match. The person, their title and
+        their employer's website are still worth returning; only the email
+        is missing, and only an email costs a credit."""
         fake_provider = _FakeRealProvider(
             snippet_title="Michael Jones - Senior Trading Manager at Falcon Petroleum "
             "Trading | LinkedIn",
@@ -264,11 +273,12 @@ class TestProfileSnippetEmailEnrichment:
         response = client.post(
             "/api/discover-url", json={"url": "https://linkedin.com/in/michaeljones"}
         )
-        # The goal is an email — a contact without one is not returned.
-        assert response.status_code == 422
-        detail = response.json()["detail"]
-        assert "No business email found for Michael Jones" in detail
-        assert "falconpetro.example" in detail
+        assert response.status_code == 200
+        body = response.json()
+        assert body["contact_person_name"] == "Michael Jones"
+        assert body["company_name"] == "Falcon Petroleum Trading"
+        assert body["website"] == "https://falconpetro.example"
+        assert body["emails"] == []
 
     def test_no_domain_found_skips_enrichment_entirely(self, client, monkeypatch):
         fake_provider = _FakeRealProvider(
@@ -290,8 +300,13 @@ class TestProfileSnippetEmailEnrichment:
         response = client.post(
             "/api/discover-url", json={"url": "https://linkedin.com/in/michaeljones"}
         )
-        assert response.status_code == 422
-        assert "no official website could be found" in response.json()["detail"]
+        # No domain means nothing to look an email up against, so the
+        # provider is never called — but the contact still comes back.
+        assert response.status_code == 200
+        body = response.json()
+        assert body["company_name"] == "Falcon Petroleum Trading"
+        assert body["website"] is None
+        assert body["emails"] == []
         assert called is False
 
     def test_blocked_domains_are_never_used_as_the_company_website(self, client, monkeypatch):
@@ -312,6 +327,11 @@ class TestProfileSnippetEmailEnrichment:
         response = client.post(
             "/api/discover-url", json={"url": "https://linkedin.com/in/michaeljones"}
         )
-        # No usable domain means no email lookup, so no result at all.
-        assert response.status_code == 422
-        assert "no official website could be found" in response.json()["detail"]
+        # The blocked hit yields no usable domain, so no email lookup runs
+        # (enforced by fail_if_called above) and no website is claimed — but
+        # the contact itself is still returned.
+        assert response.status_code == 200
+        body = response.json()
+        assert body["contact_person_name"] == "Michael Jones"
+        assert body["website"] is None
+        assert body["emails"] == []

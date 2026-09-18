@@ -73,7 +73,10 @@ class DiscoveredCompanyPreviewSchema(BaseModel):
     `/discover` and `/discover-url`. Nothing with this shape exists in the
     database until the client echoes it back to `/companies/save`."""
 
-    company_name: str
+    # Null when a person was found without an identifiable employer. The
+    # contact is still returned, but `/companies/save` requires a name, so
+    # the client must collect one before such a preview can be saved.
+    company_name: str | None = None
     website: str | None = None
     country: str | None = None
     city: str | None = None

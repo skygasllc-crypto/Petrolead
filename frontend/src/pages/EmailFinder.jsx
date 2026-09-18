@@ -87,6 +87,16 @@ function Initials({ name, className = "h-11 w-11 text-sm" }) {
 }
 
 function SaveControl({ preview, state, onSave }) {
+  // A company is what gets saved — a contact whose employer wasn't
+  // identified has nothing to attach to, and the API would reject it.
+  if (!preview.company_name) {
+    return (
+      <span className="text-xs text-ink-700">
+        Add their company to save this contact — look them up again under
+        &quot;Name + company&quot;.
+      </span>
+    );
+  }
   if (state.status === "saved") {
     return (
       <Link
@@ -183,9 +193,8 @@ function PersonResult({ preview }) {
         <div className="min-w-0 flex-1">
           <div className="text-base font-semibold text-ink-100">{name}</div>
           <div className="truncate text-sm text-ink-500">
-            {preview.contact_person_title
-              ? `${preview.contact_person_title} at ${preview.company_name}`
-              : preview.company_name}
+            {[preview.contact_person_title, preview.company_name].filter(Boolean).join(" at ") ||
+              "Employer not named in their public listing"}
           </div>
         </div>
         <SaveControl preview={preview} state={saveState} onSave={save} />
@@ -352,8 +361,9 @@ function LinkedInPanel() {
         </p>
       )}
       <HelpText>
-        PetroLead reads the profile&apos;s public search listing — it never logs into LinkedIn —
-        and only returns the contact when a business email is found.
+        PetroLead reads the profile&apos;s public search listing — it never logs into LinkedIn.
+        You get the contact either way; a credit is spent only when a business email is
+        actually found.
       </HelpText>
       <LookupOutcome lookup={lookup} render={(preview) => <PersonResult preview={preview} />} />
     </>
@@ -503,7 +513,9 @@ function BulkRow({ result }) {
             <span className="font-normal text-ink-500"> — {preview.contact_person_title}</span>
           )}
         </div>
-        <div className="truncate text-xs text-ink-500">{preview.company_name}</div>
+        <div className="truncate text-xs text-ink-500">
+          {preview.company_name || "Employer not named"}
+        </div>
         {preview.emails[0] ? (
           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs font-medium text-ink-100">
             {preview.emails[0].email}

@@ -107,6 +107,42 @@ class TestParseProfileSnippet:
         assert parse_profile_snippet("   ") is None
         assert parse_profile_snippet("| LinkedIn") is None
 
+    def test_en_dash_separates_name_from_headline(self):
+        # Regression: LinkedIn titles use a hyphen, an en-dash or an em-dash
+        # interchangeably. Splitting on " - " alone left an en-dash title
+        # unsplit, so the entire headline was reported as the person's name
+        # — which is what a real lookup showed the user.
+        parsed = parse_profile_snippet(
+            "Konstantin Ryazantsev – Experienced Procurement Manager in Oil ..."
+        )
+        assert parsed.name == "Konstantin Ryazantsev"
+        # Two segments with no explicit "at Company": the headline stays
+        # unclaimed as both title and employer, same as any other ambiguous
+        # second segment (see the two-segment test above).
+        assert parsed.title is None
+        assert parsed.company_name is None
+
+    def test_em_dash_separates_name_from_headline(self):
+        parsed = parse_profile_snippet(
+            "Michael Jones — Senior Trading Manager at Falcon Petroleum Trading | LinkedIn"
+        )
+        assert parsed.name == "Michael Jones"
+        assert parsed.company_name == "Falcon Petroleum Trading"
+
+    def test_pipe_separates_name_from_headline(self):
+        parsed = parse_profile_snippet(
+            "Michael Jones | Senior Trading Manager at Falcon Petroleum Trading | LinkedIn"
+        )
+        assert parsed.name == "Michael Jones"
+        assert parsed.company_name == "Falcon Petroleum Trading"
+
+    def test_a_hyphenated_name_is_never_split(self):
+        # A dash only separates segments when it has whitespace around it,
+        # so a hyphenated name survives intact.
+        parsed = parse_profile_snippet("Jean-Luc Bernard - Refinery Manager at Total | LinkedIn")
+        assert parsed.name == "Jean-Luc Bernard"
+        assert parsed.company_name == "Total"
+
 
 class TestBuildProfileSnippetQuery:
     def test_builds_a_site_scoped_query_from_the_exact_url(self):

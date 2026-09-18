@@ -167,7 +167,7 @@ class TestBulkContactLookupNameAndCompany:
         assert preview["website"] == "https://falconpetro.example"
         assert preview["emails"] == [{"email": "jane.doe@falconpetro.example", "is_valid": True}]
 
-    def test_item_without_a_found_email_fails_and_others_still_succeed(self, client, monkeypatch):
+    def test_an_item_without_an_email_still_returns_its_contact(self, client, monkeypatch):
         fake_provider = _FakeRealProvider(
             snippet_title="unused",
             website_url="https://falconpetro.example/about",
@@ -192,12 +192,15 @@ class TestBulkContactLookupNameAndCompany:
         )
         assert response.status_code == 200
         body = response.json()
-        assert body["succeeded_count"] == 1
-        assert body["failed_count"] == 1
-        assert body["results"][0]["success"] is True
-        assert body["results"][1]["success"] is False
-        assert body["results"][1]["preview"] is None
-        assert "No business email found for John Roe" in body["results"][1]["error"]
+        # Both are results; only Jane's email was found, so only Jane's
+        # lookup costs a credit.
+        assert body["succeeded_count"] == 2
+        assert body["failed_count"] == 0
+        assert body["results"][0]["preview"]["emails"] == [
+            {"email": "jane.doe@falconpetro.example", "is_valid": True}
+        ]
+        assert body["results"][1]["preview"]["contact_person_name"] == "John Roe"
+        assert body["results"][1]["preview"]["emails"] == []
 
     def test_mixed_url_and_name_company_items_in_one_request(self, client):
         response = client.post(

@@ -40,7 +40,12 @@ class DiscoveryRequest:
 class DiscoveredCompany:
     """A single company as returned by any source connector, pre-persistence."""
 
-    company_name: str
+    # None only for a person found without an identifiable employer (the
+    # LinkedIn profile-snippet fallback): the contact is still worth
+    # showing, but there's no company to attach them to until the user
+    # names one, so such a candidate is preview-only and can't be saved —
+    # `companies.company_name` is NOT NULL.
+    company_name: str | None
     website: str | None = None
     country: str | None = None
     city: str | None = None

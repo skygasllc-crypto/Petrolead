@@ -31,7 +31,7 @@ const FAQS = [
   },
   {
     q: "Why didn't a profile return an email?",
-    a: "A lookup is skipped when the profile's public listing doesn't name a current employer, when the company's website can't be found, or when no confident business email match exists. If you know where the person works, try the lookup by name and company instead.",
+    a: "An email can't always be found — the profile's public listing may not name a current employer, the company's website may not be locatable, or there may be no confident match. You still get the person's name, title and profile link, and no credit is spent. If you know where they work, try the lookup by name and company instead.",
   },
   {
     q: "Can I find LinkedIn emails in bulk?",
@@ -321,7 +321,7 @@ export default function LinkedInEmailFinder() {
             items={[
               "Name, title and company identified from the public profile listing",
               "Every email labeled Verified, Unverified or Check pending",
-              "Only returns a contact when a business email is actually found",
+              "A credit is spent only when a business email is actually found",
             ]}
           />
           <FeatureCta
