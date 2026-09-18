@@ -124,9 +124,13 @@ PetroLead/
   profile, reporting someone's *school* as their employer).
 - **`discovery/email_finder.py`** is an optional enrichment on top of that:
   once a company's domain is confirmed via an actual search result (never
-  guessed — see `company_service._resolve_company_domain`), it asks
-  [Hunter.io](https://hunter.io/) (`HUNTER_IO_API_KEY`) whether it has a
-  confident (score ≥ 50) business email for that specific named person.
+  guessed — see `company_service._resolve_company_domain`), it asks the
+  configured contact provider for a business email for that specific named
+  person. `CONTACT_PROVIDER=hunter` uses [Hunter.io](https://hunter.io/) and
+  accepts a match only at score ≥ 50; `CONTACT_PROVIDER=prospeo` uses
+  Prospeo's enrich-person endpoint and treats a masked (unrevealed) address
+  as no match, since it can never be mailed. Either way the function returns
+  the same shape, so the provider choice doesn't leak past this module.
   Skipped entirely when unconfigured, in mock mode, or when Hunter has no
   confident match — the preview still succeeds either way, just without an
   email attached.
@@ -228,6 +232,7 @@ Copy `.env.example` to `.env` and fill in real values. **Never commit `.env`.**
 | `SEARCHAPI_IO_API_KEY` | Required for `searchapi_io`. From [searchapi.io](https://www.searchapi.io/) — free tier (100 requests) with no credit card required at signup, the least friction of the four if you want real results without linking payment info. |
 | `SERPER_API_KEY` | Required for `serper`. From [serper.dev](https://serper.dev/) — Google results, 2,500 free queries with no credit card, then prepaid credit packs (the lowest cost per query of the providers here). |
 | `HUNTER_IO_API_KEY` | Optional. From [hunter.io](https://hunter.io/) — enriches a "paste a LinkedIn profile link" preview with a verified business email for that specific person, once a company domain is confirmed. Everything else works without it. |
+| `CONTACT_PROVIDER` / `PROSPEO_API_KEY` | Which service finds a named person's business email: `hunter` (default) or `prospeo`. An unsupported name stops the app rather than silently finding nothing; a provider selected without its key is skipped, and lookups simply return no email. |
 | `HTTP_TIMEOUT_SECONDS`, `MAX_CONCURRENT_FETCHES` | Extraction/enrichment tuning. |
 | `REDIS_URL` | Only needed for Phase 10's Celery worker/beat. |
 | `RATE_LIMIT_PER_MINUTE` | Reserved for API rate limiting. |
@@ -359,7 +364,7 @@ different server or Chromium.
 | `POST` | `/api/auth/change-password` | *(logged in)* Body: `current_password`, `new_password` (8+ chars). Ends every other session; returns a fresh token for this one. |
 | `POST` | `/api/auth/revoke-sessions` | *(logged in)* "Sign out other devices" — every token issued before now stops working. Returns a fresh token for the caller. |
 | `POST` | `/api/discover` | Run a discovery job. Body: region, country, city, industry, activity, products[], keywords[], limit, `include_social_search`, `include_b2b_directories` (Phase 5/6, both default `false`). **Preview only — nothing is saved.** Returns deduplicated (in-memory only) candidates, each scored and flagged `already_saved`/`existing_company_id` against your saved companies. |
-| `POST` | `/api/discover-url` | "Paste a link" quick lookup — body: `{"url": "..."}`. For a company website, fetches that one page (+ its Contact page if found) and extracts name/description/contact/social/emails/phones the same way discovery enrichment does. For a personal LinkedIn profile URL (`linkedin.com/in/...`), the page itself is login-gated and never fetched — instead it looks up whatever public search-engine snippet exists for it and returns `contact_person_name`/`contact_person_title` alongside the company it mentions, if any, plus a business email if `HUNTER_IO_API_KEY` is configured and finds a confident match. **Preview only — nothing is saved.** Returns `422` with a clear message if nothing usable was found. |
+| `POST` | `/api/discover-url` | "Paste a link" quick lookup — body: `{"url": "..."}`. For a company website, fetches that one page (+ its Contact page if found) and extracts name/description/contact/social/emails/phones the same way discovery enrichment does. For a personal LinkedIn profile URL (`linkedin.com/in/...`), the page itself is login-gated and never fetched — instead it looks up whatever public search-engine snippet exists for it and returns `contact_person_name`/`contact_person_title` alongside the company it mentions, if any, plus a business email if a contact provider (`CONTACT_PROVIDER`) is configured and finds a confident match. **Preview only — nothing is saved.** Returns `422` with a clear message if nothing usable was found. |
 | `POST` | `/api/companies/save` | Persist one previewed candidate — the body is the same object `/discover` or `/discover-url` returned for that row. Creates a new company, or merges into an existing match (dedup is the same logic either way). |
 | `POST` | `/api/companies/save-bulk` | Persist several previewed candidates at once — body: `{"companies": [...]}` (raw items from a `/discover` response, up to 200). Returns the saved companies plus `new_count`/`duplicate_count`. |
 | `GET` | `/api/companies` | List companies. Filters: `country`, `region`, `industry`, `product`, `min_relevance`, `min_lead_score`, `has_email`, `has_phone`, `has_exported`, `search`; pagination: `page`, `page_size`. |

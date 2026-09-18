@@ -19,6 +19,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # keep the two in step when an adapter is added.
 SUPPORTED_EMAIL_VERIFY_PROVIDERS = frozenset({"mx", "millionverifier"})
 
+# Providers that can find a named person's business email. Each needs its
+# own key; an unset key disables the provider rather than failing every
+# lookup. Keep in step with app/discovery/email_finder.py.
+SUPPORTED_CONTACT_PROVIDERS = frozenset({"hunter", "prospeo"})
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -64,6 +69,12 @@ class Settings(BaseSettings):
     # best-effort enrichment on top of the LinkedIn profile-snippet lookup
     # (see `discovery/email_finder.py`); never required.
     hunter_io_api_key: str | None = None
+
+    # Which service resolves a named person's business email. Hunter has been
+    # the only option historically; Prospeo is selectable without code changes
+    # so the dependency can be moved if terms or coverage demand it.
+    contact_provider: str = "hunter"
+    prospeo_api_key: str | None = None
 
     # --- HTTP / extraction ---
     http_timeout_seconds: int = 10
@@ -138,7 +149,7 @@ class Settings(BaseSettings):
     # --- Logging ---
     log_level: str = "INFO"
 
-    @field_validator("docs_enabled", "email_verify_api_key", mode="before")
+    @field_validator("docs_enabled", "email_verify_api_key", "prospeo_api_key", mode="before")
     @classmethod
     def empty_string_means_unset(cls, value: object) -> object:
         """A variable set to nothing — `DOCS_ENABLED=` in a copied .env, or an
@@ -148,6 +159,19 @@ class Settings(BaseSettings):
         if isinstance(value, str) and not value.strip():
             return None
         return value
+
+    @field_validator("contact_provider")
+    @classmethod
+    def known_contact_provider(cls, value: str) -> str:
+        """An unknown provider name would silently find no emails at all, so
+        it stops the app instead — the same reasoning as the verifier."""
+        name = (value or "").strip().lower()
+        if name not in SUPPORTED_CONTACT_PROVIDERS:
+            supported = ", ".join(sorted(SUPPORTED_CONTACT_PROVIDERS))
+            raise ValueError(
+                f"CONTACT_PROVIDER={value!r} isn't supported (supported: {supported})."
+            )
+        return name
 
     @field_validator("email_verify_provider")
     @classmethod
