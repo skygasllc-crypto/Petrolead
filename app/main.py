@@ -71,11 +71,25 @@ async def lifespan(app: FastAPI):
     # `alembic upgrade head` once per release instead.
     if settings.run_migrations_on_startup:
         run_migrations()
+    # Which providers are live, and whether each key is present — never the
+    # key itself. A provider selected without its key disables itself
+    # silently (see `discovery/email_finder.py`), so without this line the
+    # only symptom is lookups quietly returning nothing.
+    def key_state(value: str | None) -> str:
+        return "set" if value else "unset"
+
     logger.info(
-        "PetroLead starting | env=%s | database=%s | search_provider=%s",
+        "PetroLead starting | env=%s | database=%s | search_provider=%s | "
+        "contact_provider=%s (hunter_key=%s prospeo_key=%s) | "
+        "email_verify_provider=%s (key=%s)",
         settings.app_env,
         settings.database_url.split("://")[0] + "://***",
         settings.search_provider,
+        settings.contact_provider,
+        key_state(settings.hunter_io_api_key),
+        key_state(settings.prospeo_api_key),
+        settings.email_verify_provider,
+        key_state(settings.email_verify_api_key),
     )
     # A default SECRET_KEY outside development doesn't get this far: the
     # settings refuse to load at all (see `app.config`).
