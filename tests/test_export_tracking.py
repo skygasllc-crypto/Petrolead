@@ -54,6 +54,18 @@ class TestEmailExportTracking:
         assert not_exported["total"] == 0
         assert exported["total"] > 0
 
+    def test_txt_export_also_stamps_exported_at(self, client):
+        """A format that skipped the stamp would quietly break the "Not yet
+        exported" filter — addresses could be exported repeatedly while
+        still showing as fresh."""
+        discover_and_save(client, {"country": "United Arab Emirates", "limit": 10})
+        assert all(e["exported_at"] is None for e in client.get("/api/emails").json()["items"])
+
+        client.get("/api/emails/export?format=txt")
+
+        after = client.get("/api/emails").json()["items"]
+        assert all(e["exported_at"] is not None for e in after)
+
     def test_csv_includes_exported_date_column(self, client):
         discover_and_save(client, {"country": "United Arab Emirates", "limit": 10})
         response = client.get("/api/emails/export?format=csv")

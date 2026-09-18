@@ -60,6 +60,31 @@ class TestEmailsExportEndpoint:
         assert response.status_code == 200
         assert "spreadsheetml" in response.headers["content-type"]
 
+    def test_export_txt_is_addresses_only(self, client):
+        """The point of the text format: a file that pastes straight into a
+        mail tool. A header row would arrive as a bogus recipient, so its
+        absence is the assertion that matters — the CSV test above asserts
+        the opposite."""
+        discover_and_save(client, {"country": "United Arab Emirates", "limit": 10})
+        response = client.get("/api/emails/export?format=txt")
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/plain")
+        assert ".txt" in response.headers["content-disposition"]
+
+        lines = [line for line in response.text.splitlines() if line.strip()]
+        assert lines, "expected at least one address"
+        assert "Email" not in lines, "a header row would be mailed as an address"
+        assert all("@" in line for line in lines)
+        # Addresses only — no other exported column leaks in.
+        assert not any("," in line for line in lines)
+
+    def test_export_txt_with_no_emails_still_succeeds(self, client):
+        """An empty result must be an empty file, not a crash: the text
+        branch indexes a column that a column-less empty frame lacks."""
+        response = client.get("/api/emails/export?format=txt")
+        assert response.status_code == 200
+        assert response.text.strip() == ""
+
     def test_export_rejects_invalid_format(self, client):
         response = client.get("/api/emails/export?format=pdf")
         assert response.status_code == 422

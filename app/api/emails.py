@@ -107,7 +107,7 @@ async def verify_emails(
 
 @router.get("/emails/export")
 def export_emails(
-    format: str = Query(default="csv", pattern="^(csv|xlsx)$"),
+    format: str = Query(default="csv", pattern="^(csv|xlsx|txt)$"),
     search: str | None = None,
     is_valid: bool | None = None,
     country: str | None = None,
@@ -116,10 +116,17 @@ def export_emails(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> StreamingResponse:
-    """Export emails matching the given filters as CSV or Excel.
+    """Export emails matching the given filters as CSV, Excel or a plain
+    text list.
+
+    `txt` is addresses only, one per line — no header row and no other
+    columns, because that file exists to be pasted straight into a mail
+    tool and a header would arrive as a bogus recipient.
 
     Every exported email is stamped with `exported_at` so it can be told
     apart from fresh, not-yet-exported ones (`has_exported=false` filter).
+    That applies to `txt` too: a format that skipped the stamp would
+    quietly break the "Not yet exported" filter.
     """
     billing_service.require_feature(db, current_user, "export", "CSV & Excel export")
     try:
@@ -144,6 +151,13 @@ def export_emails(
         df.to_excel(buffer, index=False, sheet_name="Emails")
         media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         filename = "petrolead-emails.xlsx"
+    elif format == "txt":
+        # Addresses only, one per line. An empty result must still be a
+        # valid (empty) file rather than a KeyError on a column-less frame.
+        addresses = df["Email"].tolist() if not df.empty else []
+        buffer.write(("\n".join(addresses) + "\n" if addresses else "").encode("utf-8"))
+        media_type = "text/plain; charset=utf-8"
+        filename = "petrolead-emails.txt"
     else:
         df.to_csv(buffer, index=False)
         media_type = "text/csv"

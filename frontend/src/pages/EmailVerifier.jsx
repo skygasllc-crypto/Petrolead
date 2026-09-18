@@ -66,6 +66,23 @@ export default function EmailVerifier() {
     }
   }
 
+  // The same addresses as the copy button, saved as a file instead. Built
+  // in the browser from results already on the page — no request, and no
+  // plan gate, because copying them is already available to everyone.
+  function handleDownloadValid() {
+    const blob = new Blob([validEmails.map((r) => r.email).join("\n") + "\n"], {
+      type: "text/plain;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "verified-emails.txt";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <div>
@@ -166,6 +183,15 @@ export default function EmailVerifier() {
                 >
                   <Icon name="copy" className="h-3.5 w-3.5" />
                   Copy deliverable addresses
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownloadValid}
+                  disabled={validEmails.length === 0}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-base-600 px-3 py-1.5 text-xs font-semibold text-ink-300 hover:border-brand-500 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Icon name="download" className="h-3.5 w-3.5" />
+                  Download .txt
                 </button>
               </div>
             </div>

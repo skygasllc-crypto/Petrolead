@@ -108,6 +108,14 @@ export default function Emails() {
           >
             Export Excel
           </button>
+          {/* Addresses only, one per line — for pasting into a mail tool. */}
+          <button
+            type="button"
+            onClick={() => handleExport("txt")}
+            className="rounded-md border border-base-600 px-4 py-2 text-sm font-medium text-ink-300 hover:border-brand-500 hover:text-brand-600"
+          >
+            Export .txt
+          </button>
         </div>
       </div>
 
