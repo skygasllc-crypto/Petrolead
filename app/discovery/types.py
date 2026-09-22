@@ -22,6 +22,10 @@ class DiscoveryRequest:
     city: str | None = None
     industry: str | None = None
     activity: str | None = None
+    # What kind of counterparty to look for — "Suppliers", "Traders" and so
+    # on (see `search.ROLE_PHRASE_SUFFIXES`). None means any, and adds no
+    # role wording to the queries.
+    role: str | None = None
     products: list[str] = field(default_factory=list)
     keywords: list[str] = field(default_factory=list)
     limit: int = 25

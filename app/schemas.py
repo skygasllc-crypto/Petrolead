@@ -26,6 +26,10 @@ class DiscoverRequestSchema(BaseModel):
     city: str | None = Field(default=None, max_length=150)
     industry: str | None = Field(default=None, max_length=150)
     activity: str | None = Field(default=None, max_length=150)
+    # What kind of counterparty to look for. An unrecognised value simply
+    # adds no role wording rather than failing the search — see
+    # `search.ROLE_PHRASE_SUFFIXES`.
+    role: str | None = Field(default=None, max_length=50)
     products: list[str] = Field(default_factory=list)
     keywords: list[str] = Field(default_factory=list)
     limit: int = Field(default=25)
@@ -44,7 +48,7 @@ class DiscoverRequestSchema(BaseModel):
     def strip_blank_entries(cls, value: list[str]) -> list[str]:
         return [v.strip() for v in value if v and v.strip()]
 
-    @field_validator("region", "country", "city", "industry", "activity")
+    @field_validator("region", "country", "city", "industry", "activity", "role")
     @classmethod
     def strip_str(cls, value: str | None) -> str | None:
         if value is None:

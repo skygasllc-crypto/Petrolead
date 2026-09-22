@@ -64,6 +64,7 @@ def _to_discovery_request(payload: DiscoverRequestSchema) -> DiscoveryRequest:
         city=payload.city,
         industry=payload.industry,
         activity=payload.activity,
+        role=payload.role,
         products=list(payload.products),
         keywords=list(payload.keywords),
         limit=payload.limit,

@@ -80,6 +80,56 @@ class TestQueryPhrasing:
         assert len(QueryBuilder().build(request)) <= MAX_QUERIES_PER_REQUEST
 
 
+class TestRoleFilter:
+    """Asking for suppliers has to actually ask for suppliers."""
+
+    def test_role_combines_with_industry_rather_than_replacing_it(self):
+        queries = QueryBuilder().build(
+            DiscoveryRequest(industry="Bunkering", role="Suppliers", country="Kazakhstan")
+        )
+        assert any("bunkering supplier" in q for q in queries)
+        # The industry's own phrasing survives alongside it.
+        assert any("marine fuel bunkering" in q for q in queries)
+
+    def test_role_phrases_come_first_so_the_cap_cannot_drop_them(self):
+        """Queries are capped at 12; if role wording sorted last, choosing a
+        role could leave the same company-led queries as before."""
+        request = DiscoveryRequest(
+            city="Dubai",
+            country="United Arab Emirates",
+            region="Middle East",
+            industry="Petroleum Trading",
+            products=["diesel", "jet fuel"],
+            role="Suppliers",
+        )
+        queries = QueryBuilder().build(request)
+        assert len(queries) <= MAX_QUERIES_PER_REQUEST
+        assert any("supplier" in q for q in queries), "the role must survive truncation"
+
+    def test_role_applies_to_products_too(self):
+        queries = QueryBuilder().build(
+            DiscoveryRequest(products=["diesel"], role="Distributors")
+        )
+        assert any("diesel distributor" in q for q in queries)
+
+    def test_role_alone_still_searches_the_trade(self):
+        queries = QueryBuilder().build(DiscoveryRequest(role="Traders"))
+        assert queries
+        assert any("trader" in q for q in queries)
+
+    def test_an_unknown_role_adds_nothing_rather_than_failing(self):
+        """A stale client sending a role this build doesn't know must get a
+        normal search, not an error or an empty one."""
+        queries = QueryBuilder().build(DiscoveryRequest(industry="Refinery", role="Wholesalers"))
+        assert queries
+        assert all("wholesaler" not in q.lower() for q in queries)
+
+    def test_no_role_leaves_queries_unchanged(self):
+        with_none = QueryBuilder().build(DiscoveryRequest(industry="Refinery"))
+        with_blank = QueryBuilder().build(DiscoveryRequest(industry="Refinery", role=None))
+        assert with_none == with_blank
+
+
 class TestB2BSource:
     @pytest.mark.asyncio
     async def test_disabled_by_default(self):

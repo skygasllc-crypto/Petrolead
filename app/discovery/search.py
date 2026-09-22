@@ -25,17 +25,37 @@ logger = logging.getLogger("petrolead.discovery.search")
 
 # --- Query generation --------------------------------------------------------
 
+# Each industry carries at least one phrasing that does NOT say "company",
+# because many suppliers are sole traders or small outfits whose pages never
+# use that word. Seven of these used to be company- or facility-led only,
+# which silently excluded exactly the people a supplier search is for.
 _INDUSTRY_PHRASES = {
-    "Petroleum Trading": ["petroleum trading company", "petroleum trading"],
-    "Oil & Gas": ["oil and gas company", "oil & gas"],
-    "Fuel Supply": ["fuel supplier", "fuel supply company"],
-    "Refinery": ["oil refinery", "petroleum refinery"],
-    "Tank Storage": ["tank storage terminal", "petroleum tank storage"],
-    "Petroleum Logistics": ["petroleum logistics company", "fuel logistics"],
-    "Bunkering": ["bunkering company", "marine fuel bunkering"],
-    "Energy Trading": ["energy trading company"],
-    "Oil Terminal": ["oil terminal operator"],
-    "Distributor": ["petroleum products distributor", "fuel distributor"],
+    "Petroleum Trading": ["petroleum trading company", "petroleum trading", "petroleum trader"],
+    "Oil & Gas": ["oil and gas company", "oil & gas", "oil and gas supplier"],
+    "Fuel Supply": ["fuel supplier", "fuel supply company", "fuel trader"],
+    "Refinery": ["oil refinery", "petroleum refinery", "refined products supplier"],
+    "Tank Storage": ["tank storage terminal", "petroleum tank storage", "fuel storage provider"],
+    "Petroleum Logistics": [
+        "petroleum logistics company",
+        "fuel logistics",
+        "fuel transport supplier",
+    ],
+    "Bunkering": ["bunkering company", "marine fuel bunkering", "bunker supplier", "bunker trader"],
+    "Energy Trading": ["energy trading company", "energy trader", "fuel trading"],
+    "Oil Terminal": ["oil terminal operator", "fuel terminal supplier"],
+    "Distributor": ["petroleum products distributor", "fuel distributor", "fuel dealer"],
+}
+
+# What kind of counterparty to look for. Chosen in the Discover form and
+# combined with whatever industry/product was picked, so "suppliers of
+# diesel" is expressible directly instead of being inferred from Products.
+# "Any" (the default) adds no role wording and leaves the query as it was.
+ROLE_PHRASE_SUFFIXES = {
+    "Suppliers": ["supplier", "supply company"],
+    "Traders": ["trader", "trading company"],
+    "Distributors": ["distributor", "dealer"],
+    "Producers": ["producer", "refinery"],
+    "Buyers": ["buyer", "importer"],
 }
 
 # Deliberately not all "... company". Many suppliers are sole traders or
@@ -149,8 +169,31 @@ class QueryBuilder:
         return terms
 
     @staticmethod
+    def _role_phrases(request: DiscoveryRequest) -> list[str]:
+        """Role wording combined with whatever subject was chosen.
+
+        Combined, never substituted: "Bunkering" + "Suppliers" must ask for
+        bunker suppliers, not lose the industry. These go first so that the
+        query cap can't truncate away the very thing the role was set to
+        find.
+        """
+        suffixes = ROLE_PHRASE_SUFFIXES.get(request.role or "", [])
+        if not suffixes:
+            return []
+
+        subjects = [p for p in request.products if p]
+        if request.industry:
+            subjects.append(request.industry)
+
+        if not subjects:
+            # No subject to qualify: ask for the role in this trade at large.
+            return [f"petroleum {suffix}" for suffix in suffixes]
+
+        return [f"{subject.lower()} {suffix}" for subject in subjects for suffix in suffixes]
+
+    @staticmethod
     def _subject_phrases(request: DiscoveryRequest) -> list[str]:
-        phrases: list[str] = []
+        phrases: list[str] = QueryBuilder._role_phrases(request)
 
         for product in request.products:
             phrases.append(f"{product} trader")

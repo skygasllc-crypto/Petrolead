@@ -23,6 +23,11 @@ export const INDUSTRIES = [
   "Distributor",
 ];
 
+// What kind of counterparty to look for. Combined with the chosen industry
+// and products, so "suppliers of diesel" can be asked for directly instead
+// of being inferred. Must match ROLE_PHRASE_SUFFIXES in app/discovery/search.py.
+export const ROLES = ["Suppliers", "Traders", "Distributors", "Producers", "Buyers"];
+
 export const PRODUCTS = [
   "EN590",
   "Diesel",

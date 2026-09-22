@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { useBilling } from "../context/BillingContext";
-import { REGIONS, INDUSTRIES, PRODUCTS, RESULT_LIMITS, COUNTRIES } from "../lib/constants";
+import { REGIONS, INDUSTRIES, PRODUCTS, RESULT_LIMITS, COUNTRIES, ROLES } from "../lib/constants";
 import DiscoveryProgress from "../components/DiscoveryProgress";
 import PreviewResultsTable from "../components/PreviewResultsTable";
 import ResultsToolbar from "../components/ResultsToolbar";
@@ -13,6 +13,7 @@ const INITIAL_FORM = {
   country: "",
   city: "",
   industry: "",
+  role: "",
   products: [],
   keywords: "",
   limit: 25,
@@ -71,6 +72,7 @@ export default function Discover() {
       country: form.country || null,
       city: form.city || null,
       industry: form.industry || null,
+      role: form.role || null,
       products: form.products,
       keywords: form.keywords
         .split(",")
@@ -254,6 +256,23 @@ export default function Discover() {
             {INDUSTRIES.map((i) => (
               <option key={i} value={i}>
                 {i}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        {/* Combined with industry and products rather than replacing them,
+            so "suppliers of diesel" can be asked for directly. */}
+        <Field label="Looking for">
+          <select
+            className={selectClasses}
+            value={form.role}
+            onChange={(e) => update("role", e.target.value)}
+          >
+            <option value="">Anyone</option>
+            {ROLES.map((r) => (
+              <option key={r} value={r}>
+                {r}
               </option>
             ))}
           </select>
