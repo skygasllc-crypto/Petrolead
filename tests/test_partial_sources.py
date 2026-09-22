@@ -1,6 +1,6 @@
 import pytest
 
-from app.discovery.search import QueryBuilder
+from app.discovery.search import MAX_QUERIES_PER_REQUEST, QueryBuilder
 from app.discovery.sources import B2BSource, SocialSource
 from app.discovery.types import DiscoveryRequest
 
@@ -33,6 +33,51 @@ class TestQueryBuilderB2BAndSocial:
         assert len(queries) > 0
         assert any("linkedin.com" in q for q in queries)
         assert any("facebook.com" in q for q in queries)
+
+
+class TestQueryPhrasing:
+    """What the queries ask for decides what can ever come back."""
+
+    def test_subjects_are_not_quoted(self):
+        """A quoted phrase is a hard constraint on Google: "petroleum
+        company" cannot match a page calling itself a petroleum *trading*
+        company. Quoting the subject was throwing away the near-matches."""
+        queries = QueryBuilder().build(DiscoveryRequest(country="Kazakhstan"))
+        assert queries
+        for q in queries:
+            subject = q.split(" Kazakhstan")[0]
+            assert '"' not in subject, f"subject should be unquoted: {q!r}"
+
+    def test_multi_word_locations_stay_quoted(self):
+        """A place name means the literal place — unquoted, "United Arab
+        Emirates" is three loose words."""
+        queries = QueryBuilder().build(DiscoveryRequest(country="United Arab Emirates"))
+        assert all('"United Arab Emirates"' in q for q in queries)
+
+    def test_a_single_word_location_needs_no_quotes(self):
+        queries = QueryBuilder().build(DiscoveryRequest(country="Kazakhstan"))
+        assert all('"Kazakhstan"' not in q for q in queries)
+        assert all("Kazakhstan" in q for q in queries)
+
+    def test_suppliers_without_a_company_are_searched_for(self):
+        """Many suppliers are sole traders whose pages never say "company".
+        Every generic phrase containing that word excluded them."""
+        queries = QueryBuilder().build(DiscoveryRequest())
+        assert queries, "a global search must still produce queries"
+        assert any("supplier" in q for q in queries)
+        assert any("trader" in q for q in queries)
+        assert any("company" not in q for q in queries)
+
+    def test_query_count_is_bounded(self):
+        """Every query is a credit, and phrases multiply by locations."""
+        request = DiscoveryRequest(
+            city="Dubai",
+            country="United Arab Emirates",
+            region="Middle East",
+            products=["diesel", "jet fuel", "gasoil"],
+            keywords=["bunkering", "storage"],
+        )
+        assert len(QueryBuilder().build(request)) <= MAX_QUERIES_PER_REQUEST
 
 
 class TestB2BSource:

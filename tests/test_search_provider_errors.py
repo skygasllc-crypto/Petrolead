@@ -116,7 +116,10 @@ class TestProviderErrors:
             assert request.method == "POST"
             assert request.headers["X-API-KEY"] == API_KEY
             assert API_KEY not in str(request.url)
-            assert json.loads(request.content) == {"q": "diesel supplier"}
+            # `page` is sent from page 1 onwards so every request has the
+            # same shape — extra results are bought as pages, never by
+            # raising `num` (see SerperProvider.search).
+            assert json.loads(request.content) == {"q": "diesel supplier", "page": 1}
             return httpx.Response(
                 200,
                 json={
@@ -135,6 +138,72 @@ class TestProviderErrors:
 
         assert [r.url for r in results] == [f"https://fuel{i}.example" for i in range(3)]
         assert results[0].snippet == "s"
+
+
+class TestSerperPagination:
+    """Extra results are bought as extra pages, not by raising `num`.
+
+    One credit buys up to 10 results; 11-100 in a single request costs two.
+    So a second page is the same results for half the money — and every
+    page beyond what the caller asked for is money spent on nothing.
+    """
+
+    def _paging_handler(self, pages: dict[int, int]):
+        """Answer page N with `pages[N]` organic results."""
+        seen = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content)
+            page = body.get("page", 1)
+            seen.append(page)
+            count = pages.get(page, 0)
+            return httpx.Response(
+                200,
+                json={
+                    "organic": [
+                        {"title": f"p{page}r{i}", "link": f"https://p{page}r{i}.example"}
+                        for i in range(count)
+                    ]
+                },
+            )
+
+        return handler, seen
+
+    async def test_a_single_page_is_enough_for_ten_or_fewer(self, monkeypatch):
+        handler, seen = self._paging_handler({1: 10})
+        _use_transport(monkeypatch, handler)
+
+        results = await SerperProvider(_settings(serper_api_key=API_KEY)).search("x", limit=10)
+
+        assert len(results) == 10
+        assert seen == [1], "asking for 10 must cost exactly one credit"
+
+    async def test_more_than_a_page_fetches_further_pages(self, monkeypatch):
+        handler, seen = self._paging_handler({1: 10, 2: 10, 3: 10})
+        _use_transport(monkeypatch, handler)
+
+        results = await SerperProvider(_settings(serper_api_key=API_KEY)).search("x", limit=25)
+
+        assert seen == [1, 2, 3]
+        assert len(results) == 25
+
+    async def test_a_short_page_stops_paging(self, monkeypatch):
+        """Results ran out, so the next page would buy nothing."""
+        handler, seen = self._paging_handler({1: 10, 2: 4, 3: 10})
+        _use_transport(monkeypatch, handler)
+
+        results = await SerperProvider(_settings(serper_api_key=API_KEY)).search("x", limit=30)
+
+        assert seen == [1, 2], "a short page means no more results to pay for"
+        assert len(results) == 14
+
+    async def test_paging_is_capped(self, monkeypatch):
+        handler, seen = self._paging_handler(dict.fromkeys(range(1, 10), 10))
+        _use_transport(monkeypatch, handler)
+
+        await SerperProvider(_settings(serper_api_key=API_KEY)).search("x", limit=500)
+
+        assert len(seen) == SerperProvider.MAX_PAGES, "one query must not run away with credits"
 
 
 class _QuotaAfterProvider:

@@ -82,7 +82,16 @@ class SearchSource(BaseSource):
     async def discover(self, request: DiscoveryRequest) -> list[DiscoveredCompany]:
         queries = self._query_builder.build(request)
         is_mock = self._provider.name == "mock"
-        per_query_limit = max(3, (request.limit // max(len(queries), 1)) + 1)
+        # A provider bills the same for ten results as for three, so asking
+        # for fewer throws away results already paid for — never go below a
+        # full page. The cap stops a large `limit` spread over few queries
+        # from quietly buying several pages (another credit each) per query.
+        results_per_page = 10
+        max_per_query = 30
+        per_query_limit = min(
+            max_per_query,
+            max(results_per_page, -(-request.limit // max(len(queries), 1))),
+        )
 
         companies: list[DiscoveredCompany] = []
         for query in queries:

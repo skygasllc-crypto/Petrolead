@@ -38,7 +38,24 @@ _INDUSTRY_PHRASES = {
     "Distributor": ["petroleum products distributor", "fuel distributor"],
 }
 
-_GENERIC_PETROLEUM_PHRASES = ["petroleum company", "oil trading company", "fuel trading company"]
+# Deliberately not all "... company". Many suppliers are sole traders or
+# small outfits whose pages never use that word, so every phrase containing
+# it quietly excludes them — which is exactly what "only companies come
+# back" looked like.
+_GENERIC_PETROLEUM_PHRASES = [
+    "petroleum supplier",
+    "fuel supplier",
+    "oil trader",
+    "diesel supplier",
+    "petroleum products distributor",
+    "petroleum company",
+    "oil trading company",
+]
+
+# Each query is one search-provider request and therefore one credit, and
+# phrases multiply by locations. A bound keeps a single discovery run's
+# cost predictable rather than a product of how many filters were filled in.
+MAX_QUERIES_PER_REQUEST = 12
 
 # Phase 6 (partial): well-known public B2B trade directories. `site:domain`
 # is a standard search-engine operator — it asks the search provider to
@@ -82,7 +99,7 @@ class QueryBuilder:
             for location in location_terms or [""]:
                 queries.append(self._compose(keyword, location))
 
-        return self._dedupe(queries)
+        return self._dedupe(queries)[:MAX_QUERIES_PER_REQUEST]
 
     def build_b2b_directory_queries(self, request: DiscoveryRequest) -> list[str]:
         """Queries scoped to known B2B directories via `site:` operators.
@@ -151,12 +168,28 @@ class QueryBuilder:
         return phrases
 
     @staticmethod
+    def _quote_location(location: str) -> str:
+        """Quote a multi-word place so "United Arab Emirates" isn't read as
+        three loose words. A single word needs no quoting."""
+        location = location.strip()
+        return f'"{location}"' if " " in location else location
+
+    @staticmethod
     def _compose(subject: str, location: str) -> str:
+        """The subject is deliberately NOT quoted.
+
+        A quoted phrase is a hard constraint on Google: `"petroleum company"`
+        cannot match a page describing itself as a petroleum *trading*
+        company. That cost most of the near-matches, and worst of all on a
+        location-less search, where the single quoted phrase was the whole
+        query. The location stays quoted because a place name means the
+        literal place.
+        """
         subject = subject.strip()
         location = location.strip()
         if subject and location:
-            return f'"{subject}" "{location}"'
-        return f'"{subject}"' if subject else f'"{location}"'
+            return f"{subject} {QueryBuilder._quote_location(location)}"
+        return subject or QueryBuilder._quote_location(location)
 
 
 # --- Search provider abstraction ---------------------------------------------
@@ -376,6 +409,15 @@ class SerperProvider(SearchProvider):
     name = "serper"
     ENDPOINT = "https://google.serper.dev/search"
 
+    # One credit buys up to 10 results; asking for 11-100 in a single
+    # request costs two. So extra results are fetched as extra *pages* of
+    # 10 (one credit each) rather than by raising `num`, which is the same
+    # results for twice the money. Google itself returns 10 per page.
+    RESULTS_PER_PAGE = 10
+    # A ceiling on pages per query: without it, one discovery run's cost
+    # would scale with whatever limit a caller asked for.
+    MAX_PAGES = 3
+
     def __init__(self, settings: Settings):
         self._api_key = settings.serper_api_key
         self._timeout = settings.http_timeout_seconds
@@ -384,15 +426,29 @@ class SerperProvider(SearchProvider):
         if not self._api_key:
             raise RuntimeError("Serper is not configured (missing API key).")
 
-        data = await _fetch_json(
-            self.name,
-            self.ENDPOINT,
-            method="POST",
-            json={"q": query},
-            headers={"X-API-KEY": self._api_key},
-            timeout=self._timeout,
+        pages_needed = min(
+            self.MAX_PAGES,
+            max(1, -(-limit // self.RESULTS_PER_PAGE)),  # ceil division
         )
-        items = data.get("organic", [])
+        items: list[dict] = []
+        for page in range(1, pages_needed + 1):
+            # `page` is 1-based; page 1 is sent explicitly so the request is
+            # the same shape throughout.
+            data = await _fetch_json(
+                self.name,
+                self.ENDPOINT,
+                method="POST",
+                json={"q": query, "page": page},
+                headers={"X-API-KEY": self._api_key},
+                timeout=self._timeout,
+            )
+            organic = data.get("organic", [])
+            items.extend(organic)
+            # A short page means the results ran out — paying for the next
+            # one would buy nothing.
+            if len(organic) < self.RESULTS_PER_PAGE or len(items) >= limit:
+                break
+
         return [
             SearchResultItem(
                 title=item.get("title", ""),
