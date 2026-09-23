@@ -183,6 +183,22 @@ function MockNotice({ preview }) {
   );
 }
 
+function PhoneList({ phones }) {
+  if (phones.length === 0) return <NotFound />;
+  return (
+    <ul className="flex flex-col gap-2">
+      {phones.map((p) => (
+        <li key={p.phone} className="flex flex-wrap items-center gap-2 text-sm font-medium text-ink-100">
+          <a href={`tel:${p.phone}`} className="hover:text-brand-600">
+            {p.phone}
+          </a>
+          <ValidityBadge isValid={p.is_valid} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function PersonResult({ preview }) {
   const [saveState, save] = useSave();
   const name = preview.contact_person_name || preview.company_name;
@@ -203,6 +219,11 @@ function PersonResult({ preview }) {
         <Detail label="Business email">
           <EmailList emails={preview.emails} />
         </Detail>
+        {preview.phones.length > 0 && (
+          <Detail label="Phone">
+            <PhoneList phones={preview.phones} />
+          </Detail>
+        )}
         <Detail label="Company website">
           {preview.website ? <ExternalLink href={preview.website} /> : <NotFound>Not found</NotFound>}
         </Detail>
@@ -234,20 +255,7 @@ function CompanyResult({ preview }) {
           <EmailList emails={preview.emails} />
         </Detail>
         <Detail label={`Phone numbers (${preview.phones.length})`}>
-          {preview.phones.length === 0 ? (
-            <NotFound />
-          ) : (
-            <ul className="flex flex-col gap-2">
-              {preview.phones.map((p) => (
-                <li key={p.phone} className="flex flex-wrap items-center gap-2 text-sm font-medium text-ink-100">
-                  <a href={`tel:${p.phone}`} className="hover:text-brand-600">
-                    {p.phone}
-                  </a>
-                  <ValidityBadge isValid={p.is_valid} />
-                </li>
-              ))}
-            </ul>
-          )}
+          <PhoneList phones={preview.phones} />
         </Detail>
         <Detail label="Contact page">
           {preview.contact_page_url ? <ExternalLink href={preview.contact_page_url} /> : <NotFound />}
