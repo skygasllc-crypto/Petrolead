@@ -4,6 +4,10 @@
 # marked `sync: false` are NOT stored here: set them in the dashboard, so no
 # key or wallet address is ever committed. See docs/DEPLOY.md.
 #
+# Every service deploys the `main` branch, and only once GitHub's CI checks
+# (.github/workflows/ci.yml) pass on that commit. Work happens on other
+# branches and reaches customers by being merged into `main`.
+#
 # Adapting this to Railway or Fly.io means the same four pieces with that
 # platform's own config file — the env vars below are what actually matter.
 
@@ -11,6 +15,8 @@ services:
   - type: web
     name: petrolead-api
     runtime: docker
+    branch: main
+    autoDeployTrigger: checksPass
     plan: starter
     healthCheckPath: /api/health
     # Migrations run once per release, before the new instances take traffic.
@@ -101,6 +107,8 @@ services:
   - type: worker
     name: petrolead-worker
     runtime: docker
+    branch: main
+    autoDeployTrigger: checksPass
     plan: starter
     # --concurrency=1 is not a tuning preference, it's what fits: Celery's
     # prefork pool forks one child per CPU core by default, and each child
@@ -152,6 +160,8 @@ services:
   - type: web
     name: petrolead-web
     runtime: static
+    branch: main
+    autoDeployTrigger: checksPass
     rootDir: frontend
     buildCommand: npm ci && npm run build
     staticPublishPath: ./dist

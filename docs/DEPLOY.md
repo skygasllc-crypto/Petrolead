@@ -9,6 +9,12 @@ are what actually matter on any of them.
 Nothing here requires taking the app down, except the one-off data move in
 step 2.
 
+**How a change reaches customers.** Render deploys the `main` branch, and
+only after GitHub's CI checks (`.github/workflows/ci.yml`: backend lint and
+tests, frontend lint and build) have passed on that commit. Do the work on
+another branch, let CI pass there, then merge it into `main`. A push that
+fails CI never deploys.
+
 ---
 
 ## 1. Before the first deploy
