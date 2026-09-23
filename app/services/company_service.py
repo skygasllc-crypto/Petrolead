@@ -33,9 +33,11 @@ from app.discovery.extractor import extract_contacts_from_snippet
 from app.discovery.lead_scoring import compute_lead_score
 from app.discovery.normalizer import extract_domain, normalize_company_name
 from app.discovery.profile_lookup import (
+    build_profile_email_query,
     build_profile_snippet_query,
     detect_personal_profile_platform,
     parse_profile_snippet,
+    profile_slug,
 )
 from app.discovery.relevance import score_relevance
 from app.discovery.search import (
@@ -770,6 +772,8 @@ async def _preview_from_profile_snippet(
     await extract_contacts_from_snippet(
         snippet_holder, f"{parsed_result.title} {parsed_result.snippet}"
     )
+    if not snippet_holder.emails:
+        await _search_profile_for_email(provider, url, snippet_holder)
     known = {e["email"].lower() for e in emails}
     emails += [e for e in snippet_holder.emails if e["email"].lower() not in known]
 
@@ -793,6 +797,30 @@ async def _preview_from_profile_snippet(
         parsed.company_name,
     )
     return preview
+
+
+async def _search_profile_for_email(provider, url: str, holder: DiscoveredCompany) -> None:
+    """Ask once more for this profile, with email terms in the query, and
+    read contacts from the snippets that come back. Only results for this
+    exact profile count, so another person's address can't be attached."""
+    query = build_profile_email_query(url)
+    slug = profile_slug(url)
+    if query is None:
+        return
+    try:
+        results = await provider.search(query, limit=3)
+    except Exception:
+        logger.warning("Profile email search failed for url=%r", url, exc_info=True)
+        return
+    text = " ".join(
+        f"{r.title} {r.snippet}" for r in results if profile_slug(r.url or "") == slug
+    )
+    if text:
+        # Extraction replaces the holder's phones; keep any the first
+        # listing already gave.
+        earlier_phones = holder.phones
+        await extract_contacts_from_snippet(holder, text)
+        holder.phones = earlier_phones + [p for p in holder.phones if p not in earlier_phones]
 
 
 async def _preview_from_name_and_company(

@@ -17,6 +17,8 @@ import re
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
+from app.discovery.search import SOCIAL_EMAIL_HINT
+
 _LINKEDIN_PERSONAL_RE = re.compile(
     r"^https?://(?:[a-z]{2,3}\.)?linkedin\.com/in/[^/?#]+/?", re.IGNORECASE
 )
@@ -118,6 +120,27 @@ def parse_profile_snippet(raw_title: str, snippet: str = "") -> ParsedProfile | 
             company = _complete(experience.group("company").strip())
 
     return ParsedProfile(name=name, title=title, company_name=company)
+
+
+def build_profile_email_query(url: str) -> str | None:
+    """The profile query again, with email terms added.
+
+    A search engine builds each snippet around the words in the query, so
+    the bare profile query can come back with a snippet that skips the
+    headline the email is in. Adding these terms makes the engine pick the
+    part of the profile that has one. Scoped to `linkedin.com` rather than
+    the pasted country host, since the profile is indexed under several.
+    """
+    slug = profile_slug(url)
+    if slug is None:
+        return None
+    return f"site:linkedin.com/in/{slug} {SOCIAL_EMAIL_HINT}"
+
+
+def profile_slug(url: str) -> str | None:
+    """The `/in/<slug>` part of a LinkedIn profile URL, lowercased."""
+    match = re.search(r"linkedin\.com/in/([^/?#]+)", url, re.IGNORECASE)
+    return match.group(1).lower() if match else None
 
 
 def build_profile_snippet_query(url: str) -> str:

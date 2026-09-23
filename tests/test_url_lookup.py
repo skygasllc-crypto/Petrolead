@@ -367,3 +367,48 @@ class TestProfileSnippetOwnEmail:
         body = response.json()
         assert body["contact_person_name"] == "Ahmed Almasri"
         assert body["emails"] == [{"email": "ahmed@almasri-fuel.example", "is_valid": True}]
+
+    def test_asks_again_with_email_terms_when_the_listing_shows_none(
+        self, client, monkeypatch
+    ):
+        """The engine picks the snippet to match the query, so the bare
+        profile query can miss the headline the email is in."""
+        queries = []
+
+        class _EmailOnlyWhenAsked(_FakeRealProvider):
+            async def search(self, query, *, limit=10):
+                queries.append(query)
+                snippet = "A hard working, self motivated individual who is ..."
+                if "email" in query:
+                    snippet = "Import export broker | +44 7876 820 351 | brokerdesk@gmail.com"
+                return [
+                    SearchResultItem(
+                        title="Almas Rokerya - Import export broker | LinkedIn",
+                        url="https://uk.linkedin.com/in/almasrokerya",
+                        snippet=snippet,
+                    ),
+                    # Another person's profile: its address must never be used.
+                    SearchResultItem(
+                        title="Someone Else | LinkedIn",
+                        url="https://www.linkedin.com/in/someone-else",
+                        snippet="someone@else.example",
+                    ),
+                ]
+
+        async def fake_mx(email, **_):
+            return True
+
+        monkeypatch.setattr(
+            company_service, "get_search_provider", lambda settings: _EmailOnlyWhenAsked("", None)
+        )
+        monkeypatch.setattr(extractor_module, "validate_email_domain", fake_mx)
+
+        response = client.post(
+            "/api/discover-url", json={"url": "https://uk.linkedin.com/in/almasrokerya"}
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert len(queries) == 2
+        assert queries[1].startswith("site:linkedin.com/in/almasrokerya ")
+        assert body["emails"] == [{"email": "brokerdesk@gmail.com", "is_valid": True}]
+        assert body["phones"] == [{"phone": "+447876820351", "is_valid": True}]
