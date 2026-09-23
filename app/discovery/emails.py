@@ -66,11 +66,14 @@ _EXCLUDED_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".css", 
 MAX_EMAILS_PER_COMPANY = 5
 
 
-def extract_emails(soup: BeautifulSoup, text: str) -> list[str]:
-    """Return deduplicated, plausible business email addresses found on a page."""
+def extract_emails(soup: BeautifulSoup | None, text: str) -> list[str]:
+    """Return deduplicated, plausible business email addresses found on a page.
+
+    `soup` is None for text with no markup, such as a search-result snippet.
+    """
     found: set[str] = set()
 
-    for anchor in soup.find_all("a", href=True):
+    for anchor in soup.find_all("a", href=True) if soup is not None else []:
         href = anchor["href"].strip()
         if href.lower().startswith("mailto:"):
             address = href[len("mailto:") :].split("?")[0].strip()

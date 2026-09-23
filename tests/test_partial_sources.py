@@ -1,6 +1,11 @@
 import pytest
 
-from app.discovery.search import MAX_QUERIES_PER_REQUEST, QueryBuilder
+from app.discovery.search import (
+    MAX_QUERIES_PER_REQUEST,
+    SOCIAL_EMAIL_HINT,
+    QueryBuilder,
+    SearchResultItem,
+)
 from app.discovery.sources import B2BSource, SocialSource
 from app.discovery.types import DiscoveryRequest
 
@@ -33,6 +38,14 @@ class TestQueryBuilderB2BAndSocial:
         assert len(queries) > 0
         assert any("linkedin.com" in q for q in queries)
         assert any("facebook.com" in q for q in queries)
+        assert any("instagram.com" in q for q in queries)
+
+    def test_social_queries_ask_for_pages_that_show_an_email(self):
+        """A social page's snippet is the only thing read from it, so a
+        snippet without an email yields no email."""
+        request = DiscoveryRequest(country="Nigeria", include_social_search=True)
+        queries = QueryBuilder().build_social_queries(request)
+        assert all(q.endswith(SOCIAL_EMAIL_HINT) for q in queries)
 
 
 class TestQueryPhrasing:
@@ -166,4 +179,43 @@ class TestSocialSource:
         for c in candidates:
             assert c.website is None
             assert len(c.social_profiles) == 1
-            assert c.social_profiles[0]["platform"] in {"linkedin", "facebook"}
+            assert c.social_profiles[0]["platform"] in {"linkedin", "facebook", "instagram"}
+
+    @pytest.mark.asyncio
+    async def test_takes_the_email_shown_in_the_snippet(self):
+        request = DiscoveryRequest(
+            country="United Arab Emirates", include_social_search=True, limit=10,
+        )
+        candidates = await SocialSource().discover(request)
+        assert candidates
+        for c in candidates:
+            slug = c.source_url.rsplit("/mock-", 1)[1]
+            assert [e["email"] for e in c.emails] == [f"info@{slug}.test"]
+
+    @pytest.mark.asyncio
+    async def test_real_snippet_emails_and_phones_are_validated(self, monkeypatch):
+        class OneHitProvider:
+            name = "stub"
+
+            async def search(self, query, *, limit=10):
+                return [
+                    SearchResultItem(
+                        title="Delta Diesel Supply (@deltadiesel) • Instagram photos",
+                        url="https://www.instagram.com/deltadiesel/",
+                        snippet="AGO & PMS supplier, Lagos. Email: sales@deltadiesel.ng "
+                        "Call +234 803 123 4567",
+                    )
+                ]
+
+        async def fake_mx(email, **_):
+            return True
+
+        monkeypatch.setattr("app.discovery.extractor.validate_email_domain", fake_mx)
+        request = DiscoveryRequest(country="Nigeria", include_social_search=True, limit=5)
+        [candidate] = (await SocialSource(provider=OneHitProvider()).discover(request))[:1]
+        assert candidate.website is None
+        assert candidate.social_profiles == [
+            {"platform": "instagram", "url": "https://www.instagram.com/deltadiesel/"}
+        ]
+        assert candidate.emails == [{"email": "sales@deltadiesel.ng", "is_valid": True}]
+        assert candidate.phones and candidate.phones[0]["is_valid"] is True

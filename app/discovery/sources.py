@@ -34,7 +34,11 @@ from urllib.parse import urlparse
 
 from app.config import Settings, get_settings
 from app.discovery.contacts import SOCIAL_DOMAINS
-from app.discovery.extractor import company_from_search_result, enrich_from_website
+from app.discovery.extractor import (
+    company_from_search_result,
+    enrich_from_website,
+    extract_contacts_from_snippet,
+)
 from app.discovery.search import (
     QueryBuilder,
     SearchProvider,
@@ -268,20 +272,33 @@ class B2BSource(_SiteScopedSearchSource):
 class SocialSource(_SiteScopedSearchSource):
     """Social-platform company discovery via search-engine `site:` queries (Phase 5, partial).
 
-    Implemented: finding LinkedIn/Facebook company pages
+    Implemented: finding LinkedIn/Facebook/Instagram pages
     (`discovery.search.SOCIAL_DISCOVERY_DOMAINS`) through the configured
     `SearchProvider`, recording the matched page as a `SocialProfile` on
-    the resulting company. Not implemented: anything needing an approved
-    platform API partnership (richer company data, verified pages, etc.).
-    This never logs into or scrapes LinkedIn/Facebook — it only reads
-    search-engine result snippets, the same trust model as any other web
-    search PetroLead runs.
+    the resulting company, and taking any email or phone number shown in
+    the search result's title/snippet. Not implemented: anything needing an
+    approved platform API partnership (richer company data, verified pages,
+    etc.). This never logs into or scrapes LinkedIn/Facebook/Instagram — it
+    only reads search-engine result snippets, the same trust model as any
+    other web search PetroLead runs.
     """
 
     name = "social"
 
     def _build_queries(self, request: DiscoveryRequest) -> list[str]:
         return self._query_builder.build_social_queries(request)
+
+    async def discover(self, request: DiscoveryRequest) -> list[DiscoveredCompany]:
+        candidates = await super().discover(request)
+        semaphore = asyncio.Semaphore(self._settings.max_concurrent_fetches)
+
+        async def _extract(candidate: DiscoveredCompany) -> None:
+            async with semaphore:
+                text = f"{candidate.company_name or ''} {candidate.description or ''}"
+                await extract_contacts_from_snippet(candidate, text)
+
+        await asyncio.gather(*(_extract(c) for c in candidates))
+        return candidates
 
     def _candidate_from_result(self, result, request, *, is_mock):
         if not result.url:

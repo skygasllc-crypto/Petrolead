@@ -95,12 +95,18 @@ B2B_DIRECTORY_DOMAINS = [
     "thomasnet.com",
 ]
 
-# Phase 5 (partial): social platforms that host structured company pages
-# worth discovering candidates from (as opposed to personal-profile-heavy
-# platforms like Instagram/X, which rarely surface as a "company page" in
-# search results). Same `site:` operator approach and same never-fetch
-# guarantee as B2B_DIRECTORY_DOMAINS above.
-SOCIAL_DISCOVERY_DOMAINS = ["linkedin.com/company", "facebook.com"]
+# Phase 5 (partial): social platforms to discover candidates on. Same
+# `site:` operator approach and same never-fetch guarantee as
+# B2B_DIRECTORY_DOMAINS above. Instagram is here because small suppliers
+# often have no website at all and list their email in their bio, which
+# search engines show in the snippet.
+SOCIAL_DISCOVERY_DOMAINS = ["linkedin.com/company", "facebook.com", "instagram.com"]
+
+# Appended to every social query. The snippet is the only thing read from a
+# social page, so a hit whose snippet has no email yields no email; this
+# asks the provider for pages whose indexed text mentions one. Google, Bing
+# and the SerpApi-style providers all read `OR` between quoted terms.
+SOCIAL_EMAIL_HINT = '"email" OR "@gmail.com"'
 
 
 class QueryBuilder:
@@ -139,7 +145,10 @@ class QueryBuilder:
         """
         if not request.include_social_search:
             return []
-        return self._site_scoped_queries(request, SOCIAL_DISCOVERY_DOMAINS)
+        return [
+            f"{q} {SOCIAL_EMAIL_HINT}"
+            for q in self._site_scoped_queries(request, SOCIAL_DISCOVERY_DOMAINS)
+        ]
 
     def _site_scoped_queries(self, request: DiscoveryRequest, domains: list[str]) -> list[str]:
         location_terms = self._location_terms(request)
@@ -554,7 +563,7 @@ class MockSearchProvider(SearchProvider):
         # (unquoted) — strip it so subject/location parsing below still
         # finds the actual quoted phrase/location, not the operator itself.
         site_scope = re.match(r"^site:(\S+)\s*", query)
-        unscoped_query = re.sub(r"^site:\S+\s*", "", query)
+        unscoped_query = re.sub(r"^site:\S+\s*", "", query).replace(SOCIAL_EMAIL_HINT, "")
         parts = [p for p in unscoped_query.split('"') if p.strip()]
         subject = (parts[0].strip() if parts else "").title() or "Petroleum"
         location = (parts[1].strip() if len(parts) > 1 else "").split()[0].title() if len(
@@ -581,6 +590,9 @@ class MockSearchProvider(SearchProvider):
                         "This is not a real discovered company — configure a real "
                         "SEARCH_PROVIDER (Google CSE, Bing, or SerpApi) to discover actual "
                         "companies."
+                        # A social hit's snippet is where its email comes
+                        # from — give it one, as a real snippet would have.
+                        + (f" Email: info@{slug}.test" if site_scope else "")
                     ),
                 )
             )

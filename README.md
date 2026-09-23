@@ -11,7 +11,8 @@ phone extraction & validation), **7** (lead scoring), **8** (CSV/Excel
 export), **9** (advanced search & filtering), and **10** (scheduled
 searches). **Phases 5 and 6** (social-platform and B2B-directory discovery)
 are *partially* implemented: two opt-in checkboxes on the Discover form find
-LinkedIn/Facebook company pages and B2B-directory listings through your
+LinkedIn/Facebook/Instagram pages (keeping any email or phone the search
+result itself shows) and B2B-directory listings through your
 configured search provider's `site:` operator — legitimate, permitted
 public-search discovery, never by logging into or scraping those platforms.
 What's still missing is a full integration (an approved platform API

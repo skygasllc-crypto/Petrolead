@@ -340,9 +340,10 @@ export default function Discover() {
             <span>
               <span className="text-ink-100">Include social-platform search</span>
               <span className="block text-xs text-ink-700">
-                Finds LinkedIn/Facebook company pages via search-engine{" "}
-                <code className="rounded bg-base-900 px-1">site:</code> queries — never logs
-                into or scrapes those platforms. Adds extra search-provider calls.
+                Finds LinkedIn, Facebook and Instagram pages via search-engine{" "}
+                <code className="rounded bg-base-900 px-1">site:</code> queries and keeps any
+                email or phone shown in the search result — never logs into or scrapes those
+                platforms. Adds extra search-provider calls.
               </span>
             </span>
           </label>

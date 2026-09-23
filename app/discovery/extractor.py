@@ -201,16 +201,37 @@ async def enrich_from_website(
     return company
 
 
+async def extract_contacts_from_snippet(company: DiscoveredCompany, text: str) -> None:
+    """Pull emails/phones out of a search result's own title and snippet.
+
+    For a social page (Facebook "About", an Instagram bio) the search
+    engine's snippet is the only content PetroLead ever reads — the page
+    itself is never fetched. Mock results are synthetic, so their emails
+    are not looked up in DNS.
+    """
+    if company.is_mock:
+        company.emails = [
+            {"email": email, "is_valid": None}
+            for email in extract_emails(None, text)[:MAX_EMAILS_PER_COMPANY]
+        ]
+        return
+    await _extract_and_validate_contacts(company, [(None, text)])
+
+
 async def _extract_and_validate_contacts(
-    company: DiscoveredCompany, pages: list[tuple[BeautifulSoup, str]]
+    company: DiscoveredCompany, pages: list[tuple[BeautifulSoup | None, str]]
 ) -> None:
-    """Phase 3/4: pull emails/phones from the fetched pages and validate them."""
+    """Phase 3/4: pull emails/phones from the fetched pages and validate them.
+
+    A page with no markup (a search snippet) is passed with `soup=None`.
+    """
     email_candidates: list[str] = []
     tel_candidates: list[str] = []
     text_phone_candidates: list[str] = []
     for soup, text in pages:
         email_candidates.extend(extract_emails(soup, text))
-        tel_candidates.extend(extract_tel_link_candidates(soup))
+        if soup is not None:
+            tel_candidates.extend(extract_tel_link_candidates(soup))
         text_phone_candidates.extend(extract_phone_text_candidates(text))
 
     email_candidates = list(dict.fromkeys(email_candidates))[:MAX_EMAILS_PER_COMPANY]
