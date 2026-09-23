@@ -29,6 +29,7 @@ from app.database.models import (
 )
 from app.discovery.deduplicator import find_match, is_confident_match
 from app.discovery.email_finder import find_person_email
+from app.discovery.extractor import extract_contacts_from_snippet
 from app.discovery.lead_scoring import compute_lead_score
 from app.discovery.normalizer import extract_domain, normalize_company_name
 from app.discovery.profile_lookup import (
@@ -732,15 +733,16 @@ async def _preview_from_profile_snippet(
     # parse rather than discarding it: a contact with no company is still a
     # result, just one that can't be enriched any further.
     parsed = None
+    parsed_result = None
     for result in results:
         candidate_parse = parse_profile_snippet(result.title, result.snippet)
         if candidate_parse is None:
             continue
         if candidate_parse.company_name:
-            parsed = candidate_parse
+            parsed, parsed_result = candidate_parse, result
             break
         if parsed is None:
-            parsed = candidate_parse
+            parsed, parsed_result = candidate_parse, result
 
     if parsed is None:
         raise UrlLookupError(
@@ -759,6 +761,18 @@ async def _preview_from_profile_snippet(
             provider, settings, company_name=parsed.company_name, full_name=parsed.name
         )
 
+    # An address the person wrote into their headline or About section is
+    # in the indexed snippet. The one under LinkedIn's "Contact info" is
+    # shown only to signed-in connections, so no search engine ever has it.
+    snippet_holder = DiscoveredCompany(
+        company_name=None, is_mock=provider.name == "mock"
+    )
+    await extract_contacts_from_snippet(
+        snippet_holder, f"{parsed_result.title} {parsed_result.snippet}"
+    )
+    known = {e["email"].lower() for e in emails}
+    emails += [e for e in snippet_holder.emails if e["email"].lower() not in known]
+
     candidate = DiscoveredCompany(
         company_name=parsed.company_name,
         website=f"https://{domain}" if domain else None,
@@ -769,6 +783,7 @@ async def _preview_from_profile_snippet(
         contact_person_name=parsed.name,
         contact_person_title=parsed.title,
         emails=emails,
+        phones=snippet_holder.phones,
     )
     preview = _build_preview(db, candidate, owner_id)
     logger.info(

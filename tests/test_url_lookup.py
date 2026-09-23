@@ -335,3 +335,35 @@ class TestProfileSnippetEmailEnrichment:
         assert body["contact_person_name"] == "Michael Jones"
         assert body["website"] is None
         assert body["emails"] == []
+
+
+class TestProfileSnippetOwnEmail:
+    """An address the person put in their headline or About section is in
+    the indexed listing itself, and needs no employer or Hunter.io match."""
+
+    def test_email_in_the_listing_is_returned_without_an_employer(self, client, monkeypatch):
+        class _SnippetWithEmail(_FakeRealProvider):
+            async def search(self, query, *, limit=10):
+                return [
+                    SearchResultItem(
+                        title="Ahmed Almasri - Fuel Trader | LinkedIn",
+                        url="https://uk.linkedin.com/in/ahmedalmasri",
+                        snippet="Diesel and Jet A1 supply. Contact: ahmed@almasri-fuel.example",
+                    )
+                ]
+
+        async def fake_mx(email, **_):
+            return True
+
+        monkeypatch.setattr(
+            company_service, "get_search_provider", lambda settings: _SnippetWithEmail("", None)
+        )
+        monkeypatch.setattr(extractor_module, "validate_email_domain", fake_mx)
+
+        response = client.post(
+            "/api/discover-url", json={"url": "https://uk.linkedin.com/in/ahmedalmasri"}
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["contact_person_name"] == "Ahmed Almasri"
+        assert body["emails"] == [{"email": "ahmed@almasri-fuel.example", "is_valid": True}]
