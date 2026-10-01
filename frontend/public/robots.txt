@@ -10,6 +10,8 @@ User-agent: *
 
 Disallow: /login
 Disallow: /register
+Disallow: /forgot-password
+Disallow: /reset-password
 Disallow: /admin
 Disallow: /dashboard
 Disallow: /discover

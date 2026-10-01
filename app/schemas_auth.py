@@ -61,6 +61,34 @@ class ChangePasswordRequestSchema(BaseModel):
         return value
 
 
+class ForgotPasswordRequestSchema(BaseModel):
+    """Body for POST /api/auth/forgot-password."""
+
+    email: EmailStr
+
+
+class ResetPasswordRequestSchema(BaseModel):
+    """Body for POST /api/auth/reset-password."""
+
+    token: str = Field(min_length=1, max_length=2000)
+    new_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def _new_password_fits_bcrypt(cls, value: str) -> str:
+        if len(value.encode("utf-8")) > MAX_PASSWORD_BYTES:
+            raise ValueError(f"Password must be at most {MAX_PASSWORD_BYTES} bytes long.")
+        return value
+
+
+class PasswordResetLinkSchema(BaseModel):
+    """An admin-issued reset link, for handing to a customer directly when
+    the app can't email it."""
+
+    reset_url: str
+    expires_in_minutes: int
+
+
 class UserSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

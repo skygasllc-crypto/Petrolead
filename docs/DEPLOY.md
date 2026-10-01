@@ -120,17 +120,17 @@ Set these on the API service. The worker needs the same values for
 | `REDIS_URL` | worker only | Celery broker. The API runs without it. |
 | `RUN_MIGRATIONS_ON_STARTUP` | yes | `false` in production — see step 4. |
 | `CORS_ORIGINS` | yes | Every origin the SPA is served from, comma-separated: `https://petrolead.org,https://www.petrolead.org`. Include the `www.` form if it resolves — a missing origin means every API call fails in the browser with no useful error. |
-| `APP_BASE_URL` | yes | Public URL of the frontend. Used for links in admin payment emails. |
+| `APP_BASE_URL` | yes | Public URL of the frontend. Used for links in admin payment emails and password reset links — a wrong value sends customers a reset link that goes nowhere. |
 | `ADMIN_EMAILS` | yes | Who can confirm payments and manage accounts. |
 | `BILLING_ENFORCED` | yes | `true` in production. `false` disables all plan and credit limits for everyone. |
 | `TRUST_PROXY_HEADERS` | yes, on a managed platform | `true`. Requests arrive through the platform's proxy, so without this the rate limiter sees one address for all traffic and throttles every customer together. Leave it `false` anywhere the app is exposed directly, or callers can forge `X-Forwarded-For` and reset their own allowance. |
-| `RATE_LIMIT_ENABLED` / `RATE_LIMIT_PER_MINUTE` / `AUTH_RATE_LIMIT_PER_MINUTE` | recommended | Per client address, per process — with 2 workers the effective limit is doubled. The auth allowance (login/register) is the one that matters for password guessing. |
+| `RATE_LIMIT_ENABLED` / `RATE_LIMIT_PER_MINUTE` / `AUTH_RATE_LIMIT_PER_MINUTE` | recommended | Per client address, per process — with 2 workers the effective limit is doubled. The auth allowance (login/register/password reset) is the one that matters for password guessing. |
 | `DOCS_ENABLED` | optional | `APP_ENV=production` already removes `/docs`, `/redoc` and `/openapi.json`; set `false` to be explicit. Must not be an empty string. |
 | `SEARCH_PROVIDER` + its key | yes | Otherwise the app serves clearly-labelled mock data. |
 | `HUNTER_IO_API_KEY` | optional | Person-email enrichment. See `docs/outreach/email-provider-permission.md` before relying on it commercially. |
 | `CRYPTO_*_ADDRESS` | for payments | Public receiving addresses. Unset coins are hidden at checkout. |
 | `COINGECKO_API_KEY` | optional | Steadier BTC/TRX quotes; the keyless tier is rate-limited. |
-| `SMTP_*` | optional | Without it, the Payments badge in the app is the only notification that a customer paid. |
+| `SMTP_*` | recommended | Sends "forgot password" links and payment notifications. Without it, customers who lose their password can't reset it themselves — an admin issues a link from the Users page ("Reset link") and sends it to them — and the Payments badge is the only notification that a customer paid. |
 | `VITE_API_BASE_URL` | frontend build | The API's base URL **including `/api`**, e.g. `https://petrolead-api.onrender.com/api`. Baked into the bundle at build time and publicly visible — never a secret. Leave unset only if the SPA and API share an origin. |
 
 ---

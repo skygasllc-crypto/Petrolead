@@ -72,8 +72,13 @@ export default function Login() {
               />
             </label>
             <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium uppercase tracking-wide text-ink-700">
-                Password
+              <span className="flex items-center justify-between">
+                <span className="text-xs font-medium uppercase tracking-wide text-ink-700">
+                  Password
+                </span>
+                <Link to="/forgot-password" className="text-xs text-brand-600 hover:underline">
+                  Forgot password?
+                </Link>
               </span>
               <input
                 type="password"

@@ -1,26 +1,37 @@
-"""Account creation, login, and "who am I" endpoints."""
+"""Account creation, login, password recovery, and "who am I" endpoints."""
 
 from __future__ import annotations
 
 import logging
 from functools import lru_cache
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.core.deps import get_current_user
-from app.core.security import create_access_token, hash_password, verify_password
+from app.core.security import (
+    PASSWORD_RESET_EXPIRE_MINUTES,
+    create_access_token,
+    create_password_reset_token,
+    decode_password_reset_token,
+    hash_password,
+    password_reset_token_matches,
+    verify_password,
+)
 from app.database.connection import get_db
 from app.database.models import User
 from app.schemas_auth import (
     ChangePasswordRequestSchema,
+    ForgotPasswordRequestSchema,
     LoginRequestSchema,
     RegisterRequestSchema,
+    ResetPasswordRequestSchema,
     TokenResponseSchema,
     UserSchema,
 )
+from app.services import notifications
 
 logger = logging.getLogger("petrolead.api.auth")
 
@@ -139,3 +150,65 @@ def revoke_sessions(
     on its next request; this session continues with the token returned."""
     logger.info("User %s revoked their other sessions", current_user.id)
     return _reissue_after_revoking(db, current_user)
+
+
+def password_reset_url(user: User, settings) -> str:
+    """A one-time link to the reset page, valid for an hour."""
+    token = create_password_reset_token(
+        user.id, hashed_password=user.hashed_password, settings=settings
+    )
+    return f"{settings.app_base_url.rstrip('/')}/reset-password?token={token}"
+
+
+@router.post("/forgot-password", status_code=202)
+def forgot_password(
+    payload: ForgotPasswordRequestSchema,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Email a reset link if the address has an active account. The answer
+    is the same either way, so this can't be used to find out who has an
+    account here."""
+    user = db.execute(
+        select(User).where(User.email == payload.email.lower())
+    ).scalar_one_or_none()
+    if user is not None and user.is_active:
+        logger.info("Password reset requested for user %s", user.id)
+        background_tasks.add_task(
+            notifications.send_password_reset,
+            user.email,
+            password_reset_url(user, get_settings()),
+            PASSWORD_RESET_EXPIRE_MINUTES,
+        )
+    return {
+        "detail": "If an account exists for that email, a link to reset its password is on "
+        "its way."
+    }
+
+
+@router.post("/reset-password", response_model=TokenResponseSchema)
+def reset_password(
+    payload: ResetPasswordRequestSchema, db: Session = Depends(get_db)
+) -> TokenResponseSchema:
+    """Set a new password from an emailed link, end every existing session,
+    and sign in. The link stops working once used, because it is tied to the
+    password it was issued against."""
+    invalid_link = HTTPException(
+        status_code=400,
+        detail="This reset link is invalid or has expired. Ask for a new one.",
+    )
+    settings = get_settings()
+    claims = decode_password_reset_token(payload.token, settings=settings)
+    if claims is None:
+        raise invalid_link
+    user_id, fingerprint = claims
+    user = db.get(User, user_id)
+    if user is None or not user.is_active:
+        raise invalid_link
+    if not password_reset_token_matches(fingerprint, user.hashed_password, settings):
+        raise invalid_link
+
+    user.hashed_password = hash_password(payload.new_password)
+    _sync_admin_status(user, settings)
+    logger.info("Password reset for user %s", user.id)
+    return _reissue_after_revoking(db, user)

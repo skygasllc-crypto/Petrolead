@@ -135,7 +135,21 @@ export const api = {
       body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
     }),
 
+  // Answers the same whether or not the address has an account.
+  forgotPassword: (email) =>
+    request("/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) }),
+
+  // Returns a fresh token, like changePassword — every other session ends.
+  resetPassword: (token, newPassword) =>
+    request("/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, new_password: newPassword }),
+    }),
+
   revokeSessions: () => request("/auth/revoke-sessions", { method: "POST" }),
+
+  adminPasswordResetLink: (userId) =>
+    request(`/admin/users/${userId}/password-reset-link`, { method: "POST" }),
 
   adminRevokeSessions: (userId) =>
     request(`/admin/users/${userId}/revoke-sessions`, { method: "POST" }),

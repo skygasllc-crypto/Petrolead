@@ -32,7 +32,12 @@ WINDOW_SECONDS = 60
 
 # Paths where a wrong guess is worth something to an attacker, so they get
 # the stricter allowance.
-AUTH_PATHS = ("/auth/login", "/auth/register")
+AUTH_PATHS = (
+    "/auth/login",
+    "/auth/register",
+    "/auth/forgot-password",
+    "/auth/reset-password",
+)
 
 # Stops the bookkeeping growing without bound if a lot of distinct addresses
 # show up; the oldest windows are dropped first.

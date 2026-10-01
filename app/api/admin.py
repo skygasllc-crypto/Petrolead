@@ -14,10 +14,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.auth import password_reset_url
+from app.config import get_settings
 from app.core.deps import get_current_admin_user
+from app.core.security import PASSWORD_RESET_EXPIRE_MINUTES
 from app.database.connection import get_db
 from app.database.models import User
-from app.schemas_auth import AdminUserSchema, UpdateUserStatusRequestSchema
+from app.schemas_auth import (
+    AdminUserSchema,
+    PasswordResetLinkSchema,
+    UpdateUserStatusRequestSchema,
+)
 from app.schemas_billing import (
     AdjustCreditsRequestSchema,
     AdminPaymentOrderSchema,
@@ -90,6 +97,26 @@ def revoke_user_sessions(
     db.refresh(user)
     logger.info("Admin %s ended every session for user %s", current_admin.id, user.id)
     return user
+
+
+@router.post("/users/{user_id}/password-reset-link", response_model=PasswordResetLinkSchema)
+def issue_password_reset_link(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin_user),
+) -> PasswordResetLinkSchema:
+    """A reset link for a customer who has lost their password, to send them
+    yourself — the fallback when the app has no SMTP to email it, or the
+    email never arrived. Nothing changes until they use it; their current
+    password keeps working until then."""
+    user = _get_user_or_404(db, user_id)
+    if not user.is_active:
+        raise HTTPException(status_code=400, detail="Unblock this account first.")
+    logger.info("Admin %s issued a password reset link for user %s", current_admin.id, user.id)
+    return PasswordResetLinkSchema(
+        reset_url=password_reset_url(user, get_settings()),
+        expires_in_minutes=PASSWORD_RESET_EXPIRE_MINUTES,
+    )
 
 
 @router.put("/users/{user_id}/subscription", response_model=AdminUserSchema)

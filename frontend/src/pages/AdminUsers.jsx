@@ -144,6 +144,33 @@ export default function AdminUsers() {
     );
   }
 
+  async function issueResetLink(targetUser) {
+    setPendingId(targetUser.id);
+    setError(null);
+    try {
+      const { reset_url: url, expires_in_minutes: minutes } = await api.adminPasswordResetLink(
+        targetUser.id,
+      );
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(url);
+        copied = true;
+      } catch {
+        // Clipboard can be blocked — the prompt below still shows the link.
+      }
+      window.prompt(
+        `Password reset link for ${targetUser.email}${copied ? " (copied)" : ""}.\n\n` +
+          `Send it to them directly. It works once and expires in ${minutes} minutes; ` +
+          "their current password keeps working until they use it.",
+        url,
+      );
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not create a reset link.");
+    } finally {
+      setPendingId(null);
+    }
+  }
+
   function changePlan(targetUser, value) {
     if (value === "") {
       const confirmed = window.confirm(
@@ -289,6 +316,15 @@ export default function AdminUsers() {
                             className="rounded-md border border-base-600 px-3 py-1.5 text-xs font-semibold text-ink-300 transition-colors hover:border-brand-500 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
                           >
                             {busy ? "Working..." : "End sessions"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => issueResetLink(u)}
+                            disabled={busy || !u.is_active}
+                            title="Get a one-time link to send them if they've lost their password"
+                            className="rounded-md border border-base-600 px-3 py-1.5 text-xs font-semibold text-ink-300 transition-colors hover:border-brand-500 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            Reset link
                           </button>
                           <button
                             type="button"
