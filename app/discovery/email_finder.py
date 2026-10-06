@@ -356,16 +356,68 @@ def name_parts(full_name: str) -> tuple[str, str] | None:
     return tokens[0].replace("-", ""), tokens[-1].replace("-", "")
 
 
-def candidate_addresses(full_name: str, domain: str) -> list[str]:
+def _format_values(full_name: str) -> dict[str, str] | None:
     parts = name_parts(full_name)
     if parts is None:
-        return []
+        return None
     first, last = parts
-    values = {"first": first, "last": last, "f": first[0], "l": last[0]}
-    return list(dict.fromkeys(f"{fmt.format(**values)}@{domain}" for fmt in _FORMATS))
+    return {"first": first, "last": last, "f": first[0], "l": last[0]}
 
 
-async def guess_person_email(*, domain: str, full_name: str, settings: Settings) -> dict | None:
+def address_for(full_name: str, domain: str, fmt: str) -> str | None:
+    """This person's address at `domain` in format `fmt` (one of `_FORMATS`)."""
+    values = _format_values(full_name)
+    if values is None or fmt not in _FORMATS:
+        return None
+    return f"{fmt.format(**values)}@{domain}"
+
+
+def format_of(full_name: str, email: str) -> str | None:
+    """Which of the common formats `email` is for this person, or None when
+    it isn't one of them (a role address, a nickname, someone else)."""
+    values = _format_values(full_name)
+    if values is None or "@" not in email:
+        return None
+    local = email.rsplit("@", 1)[0].lower()
+    for fmt in _FORMATS:
+        if fmt.format(**values) == local:
+            return fmt
+    return None
+
+
+def candidate_addresses(
+    full_name: str, domain: str, *, preferred_format: str | None = None
+) -> list[str]:
+    """Every common-format address for this person, most likely first —
+    the company's known format, when there is one, ahead of the rest."""
+    values = _format_values(full_name)
+    if values is None:
+        return []
+    formats = list(_FORMATS)
+    if preferred_format in formats:
+        formats.remove(preferred_format)
+        formats.insert(0, preferred_format)
+    return list(dict.fromkeys(f"{fmt.format(**values)}@{domain}" for fmt in formats))
+
+
+@dataclass
+class DomainHints:
+    """What's already known about a domain, so guessing doesn't pay to learn
+    it again. `catch_all` is filled in when guessing finds out."""
+
+    preferred_format: str | None = None
+    catch_all: bool | None = None
+
+
+async def guess_person_email(
+    *,
+    domain: str,
+    full_name: str,
+    settings: Settings,
+    hints: DomainHints | None = None,
+    max_checks: int | None = None,
+    exclude: frozenset[str] = frozenset(),
+) -> dict | None:
     """The first common-format address for this person that the
     verification provider confirms exists, as `{"email", "is_valid": True}`,
     or None. Never raises.
@@ -373,24 +425,43 @@ async def guess_person_email(*, domain: str, full_name: str, settings: Settings)
     A catch-all domain accepts every address, so nothing there can be
     confirmed: that's checked first with one made-up address, and guessing
     stops — presenting an unconfirmable guess as found is how lists bounce.
+    `hints` skips that check when the answer is already known, puts the
+    company's known format first, and records what the check found.
+    `exclude` skips addresses already checked.
     """
     if not settings.email_guessing_enabled:
         return None
     provider = verification.get_provider(settings)
     if provider is None:
         return None
-    candidates = candidate_addresses(full_name, domain)[: settings.email_guess_max_checks]
+    hints = hints if hints is not None else DomainHints()
+    if hints.catch_all:
+        return None
+    limit = settings.email_guess_max_checks if max_checks is None else max_checks
+    candidates = [
+        a
+        for a in candidate_addresses(full_name, domain, preferred_format=hints.preferred_format)
+        if a not in exclude
+    ][:limit]
     if not candidates:
         return None
     try:
         if not await validate_email_domain(candidates[0]):
             return None
 
-        probe = f"no-such-mailbox-{uuid.uuid4().hex[:12]}@{domain}"
-        probe_verdict = (await provider.verify([probe]))[probe]
-        if probe_verdict.status in (verification.DELIVERABLE, verification.RISKY):
-            logger.info("Not guessing at %r: it accepts any address", domain)
-            return None
+        if hints.catch_all is None:
+            probe = f"no-such-mailbox-{uuid.uuid4().hex[:12]}@{domain}"
+            probe_verdict = (await provider.verify([probe]))[probe]
+            if probe_verdict.status == verification.UNKNOWN:
+                pass  # couldn't tell; guess anyway, and don't remember it
+            else:
+                hints.catch_all = probe_verdict.status in (
+                    verification.DELIVERABLE,
+                    verification.RISKY,
+                )
+            if hints.catch_all:
+                logger.info("Not guessing at %r: it accepts any address", domain)
+                return None
 
         for start in range(0, len(candidates), _GUESS_BATCH):
             batch = candidates[start : start + _GUESS_BATCH]
@@ -399,6 +470,7 @@ async def guess_person_email(*, domain: str, full_name: str, settings: Settings)
                 if verdicts[address].status == verification.DELIVERABLE:
                     return {"email": address, "is_valid": True}
             if any(v.reason == "catch_all" for v in verdicts.values()):
+                hints.catch_all = True
                 return None
     except Exception:
         logger.warning("Email guessing failed for domain=%r", domain, exc_info=True)

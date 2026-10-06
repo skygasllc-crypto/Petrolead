@@ -146,6 +146,10 @@ export const api = {
       body: JSON.stringify({ token, new_password: newPassword }),
     }),
 
+  // Public: removes an address from the shared contact directory.
+  optOut: (email) =>
+    request("/privacy/opt-out", { method: "POST", body: JSON.stringify({ email }) }),
+
   revokeSessions: () => request("/auth/revoke-sessions", { method: "POST" }),
 
   adminPasswordResetLink: (userId) =>

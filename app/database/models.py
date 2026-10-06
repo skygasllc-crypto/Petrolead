@@ -498,3 +498,76 @@ class SavedSearch(Base):
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<SavedSearch id={self.id!r} name={self.name!r}>"
+
+
+class ContactRecord(Base):
+    """One business email address the platform has found, shared across
+    every account — the contact directory that makes each search cheaper
+    and better than the last (see `app.services.contact_directory`).
+
+    Only addresses discovery itself found are kept: on public company
+    pages, in search listings, or from a lookup provider. Lists customers
+    paste into the verifier are their own and never land here. An address
+    on the opt-out list (`SuppressedEmail`) is never stored.
+    """
+
+    __tablename__ = "contact_records"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    # Lowercased, so the same mailbox is one row however it was written.
+    email: Mapped[str] = mapped_column(String(320), unique=True, index=True, nullable=False)
+    domain: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
+
+    # Set only when the address is known to be this person's — it matched
+    # one of their name's address formats. `name_key` is the normalized
+    # "first last" used to look a person up (see email_finder.name_parts).
+    full_name: Mapped[str | None] = mapped_column(String(200))
+    name_key: Mapped[str | None] = mapped_column(String(200), index=True)
+    title: Mapped[str | None] = mapped_column(String(200))
+    company_name: Mapped[str | None] = mapped_column(String(500))
+
+    # Where it was first found: "website", "search", "apollo", "hunter",
+    # "guess_verified", ...
+    source: Mapped[str] = mapped_column(String(50), nullable=False)
+    source_url: Mapped[str | None] = mapped_column(Text)
+    # True once anything confirmed the mailbox; None when unconfirmed.
+    is_valid: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    times_seen: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<ContactRecord email={self.email!r}>"
+
+
+class EmailDomain(Base):
+    """What's been learned about a company's mail domain: which address
+    format its people use, and whether its server accepts any address
+    (catch-all), so neither has to be paid for twice."""
+
+    __tablename__ = "email_domains"
+
+    domain: Mapped[str] = mapped_column(String(255), primary_key=True)
+    # How many known addresses fit each format, e.g. {"{first}.{last}": 4}.
+    pattern_counts: Mapped[dict[str, int]] = mapped_column(JSON, default=dict)
+    is_catch_all: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    catch_all_checked_at: Mapped[datetime | None] = mapped_column(DateTime)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<EmailDomain domain={self.domain!r}>"
+
+
+class SuppressedEmail(Base):
+    """An address whose owner asked to be removed. It is deleted from the
+    directory and never stored there again."""
+
+    __tablename__ = "suppressed_emails"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    email: Mapped[str] = mapped_column(String(320), unique=True, index=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<SuppressedEmail email={self.email!r}>"

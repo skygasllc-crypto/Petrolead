@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { LegalPage, Section, List } from "../components/marketing/LegalLayout";
 import { SALES_EMAIL } from "../components/marketing/pricing";
+import { api, ApiError } from "../api/client";
 
 /* NOT LEGAL ADVICE. A starting draft describing what the software actually
    collects and stores — not reviewed by a lawyer. The section on other
@@ -8,11 +10,61 @@ import { SALES_EMAIL } from "../components/marketing/pricing";
    is exactly what the GDPR and similar laws are about. Have this reviewed
    before launch, and keep it truthful as the code changes. */
 
+function OptOutForm() {
+  const [email, setEmail] = useState("");
+  const [status, setStatus] = useState("idle"); // idle | sending | done | error
+  const [error, setError] = useState(null);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setStatus("sending");
+    setError(null);
+    try {
+      await api.optOut(email);
+      setStatus("done");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Something went wrong. Please email us.");
+      setStatus("error");
+    }
+  }
+
+  if (status === "done") {
+    return (
+      <p className="rounded-md border border-status-high/30 bg-status-high/10 px-3 py-2 text-ink-300">
+        Done. <span className="text-ink-100">{email}</span> has been removed from our contact
+        directory and won&apos;t be stored there again.
+      </p>
+    );
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="flex flex-col gap-2 sm:flex-row">
+      <input
+        type="email"
+        required
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        placeholder="you@company.com"
+        aria-label="Email address to remove"
+        className="w-full rounded-md border border-base-600 bg-base-800 px-3 py-2 text-sm text-ink-100 focus:border-brand-500 focus:outline-none sm:max-w-xs"
+      />
+      <button
+        type="submit"
+        disabled={status === "sending"}
+        className="rounded-md bg-brand-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {status === "sending" ? "Removing..." : "Remove my email"}
+      </button>
+      {error && <p className="text-status-danger sm:self-center">{error}</p>}
+    </form>
+  );
+}
+
 export default function Privacy() {
   return (
     <LegalPage
       title="Privacy Policy"
-      updated="20 October 2026"
+      updated="6 October 2026"
       intro="What PetroLead collects, why, and what you can ask us to do about it."
     >
       <Section title="1. Who controls your data">
@@ -53,18 +105,20 @@ export default function Privacy() {
             "Sources: publicly accessible company websites and public search results, plus third-party business-data providers. We do not access login-gated pages or buy consumer data.",
             "Scope: business contact details in a professional context. We do not seek personal addresses, personal phone numbers or any special-category data.",
             "Lawful basis: legitimate interests — connecting businesses with business suppliers and customers — balanced against the privacy of the people concerned.",
-            "Retention: results are stored in the account of the customer who saved them, and deleted when they delete them or close their account.",
+            "Contact directory: every business email address our searches find is kept in a shared directory, with the person's name, job title and employer when known, where it was found, and whether the mailbox was confirmed. Later searches by any customer check this directory first. Addresses our customers type or paste in themselves are never added to it.",
+            "Retention: directory entries are kept until the person opts out (below). Results a customer saves are also stored in their account, and deleted when they delete them or close their account.",
           ]}
         />
         <p>
           <strong className="font-semibold text-ink-300">
             If you are one of these people and want your details removed:
           </strong>{" "}
-          email{" "}
-          <a className="text-brand-600 hover:underline" href={`mailto:${SALES_EMAIL}`}>{SALES_EMAIL}</a>{" "}
-          and we will delete them from our systems and, where we can, prevent them being
-          rediscovered. You do not need an account, and we will not ask you to create one.
+          enter your email below. It is deleted from our contact directory straight away and
+          blocked from being stored again. You do not need an account. For anything else, such as
+          details held in a customer&apos;s saved list, email{" "}
+          <a className="text-brand-600 hover:underline" href={`mailto:${SALES_EMAIL}`}>{SALES_EMAIL}</a>.
         </p>
+        <OptOutForm />
         <p>
           Our customers are separately responsible for how they use contact details they find here,
           including telling people where they got them.
@@ -86,7 +140,8 @@ export default function Privacy() {
             <>
               Render — application hosting and the database.
             </>,
-            "Serper and Hunter — receive search terms and company domains to return results.",
+            "Serper, Hunter and Apollo — receive search terms, company domains, names and LinkedIn profile links to return results.",
+            "MillionVerifier — receives email addresses to check whether the mailbox exists.",
             "CoinGecko — provides exchange rates. It receives no personal data.",
           ]}
         />

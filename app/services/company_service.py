@@ -27,8 +27,10 @@ from app.database.models import (
     SocialProfile,
     utcnow,
 )
+from app.discovery import email_verification
 from app.discovery.deduplicator import find_match, is_confident_match
 from app.discovery.email_finder import (
+    address_for,
     apollo_match,
     find_domain_emails,
     find_person_email,
@@ -54,6 +56,7 @@ from app.discovery.search import (
 from app.discovery.sources import B2BSource, SearchSource, SocialSource, WebsiteSource
 from app.discovery.types import DiscoveredCompany, DiscoveryRequest
 from app.schemas import DiscoverRequestSchema
+from app.services import contact_directory
 
 logger = logging.getLogger("petrolead.services.company")
 
@@ -518,7 +521,7 @@ async def discover_preview(
         return search_query, []
 
     candidates = _merge_candidates_in_memory(candidates)
-    await _add_domain_search_emails(candidates)
+    await _fill_missing_emails(db, candidates)
     logger.info("Search %s: %d candidate(s) previewed, not saved", search_query.id, len(candidates))
 
     previews = [_build_preview(db, c, owner_id) for c in candidates if c.company_name.strip()]
@@ -565,7 +568,7 @@ async def run_discovery(db: Session, payload: DiscoverRequestSchema, owner_id: s
         search_query.emails_found = 0
         return search_query
 
-    await _add_domain_search_emails(candidates)
+    await _fill_missing_emails(db, candidates)
     logger.info(
         "Search %s: %d candidate(s) discovered, deduplicating", search_query.id, len(candidates)
     )
@@ -644,7 +647,7 @@ async def discover_from_url_preview(db: Session, url: str, owner_id: str) -> dic
 
     candidates = await WebsiteSource(url).discover(DiscoveryRequest())
     candidate = candidates[0]
-    await _add_domain_search_emails(candidates)
+    await _fill_missing_emails(db, candidates)
 
     learned_anything = bool(
         candidate.company_name != candidate.website
@@ -677,6 +680,31 @@ _BLOCKED_DOMAIN_SUBSTRINGS = {
 MAX_CONCURRENT_DOMAIN_SEARCHES = 5
 
 
+def _email_domain(candidate: DiscoveredCompany) -> str | None:
+    """The company's own mail domain, or None for mock data and for a
+    "website" that is really a social or directory page."""
+    if candidate.is_mock:
+        return None
+    domain = extract_domain(candidate.website)
+    if not domain or any(blocked in domain for blocked in _BLOCKED_DOMAIN_SUBSTRINGS):
+        return None
+    return domain
+
+
+async def _fill_missing_emails(db: Session, candidates: list[DiscoveredCompany]) -> None:
+    """For results whose own website showed no email: first the addresses
+    the directory already has at that domain (free), then Hunter's domain
+    search for the rest. Whatever was found is then added to the directory."""
+    for candidate in candidates:
+        domain = _email_domain(candidate)
+        if domain and not candidate.emails:
+            candidate.emails = contact_directory.known_domain_emails(
+                db, domain, limit=MAX_EMAILS_PER_COMPANY
+            )
+    await _add_domain_search_emails(candidates)
+    contact_directory.record_candidates(db, candidates)
+
+
 async def _add_domain_search_emails(candidates: list[DiscoveredCompany]) -> None:
     """For companies whose own website listed no email, add the addresses
     Hunter knows at their domain. Capped per search because every lookup
@@ -688,12 +716,10 @@ async def _add_domain_search_emails(candidates: list[DiscoveredCompany]) -> None
     targets: list[tuple[DiscoveredCompany, str]] = []
     seen_domains: set[str] = set()
     for candidate in candidates:
-        if candidate.is_mock or candidate.emails:
+        if candidate.emails:
             continue
-        domain = extract_domain(candidate.website)
+        domain = _email_domain(candidate)
         if not domain or domain in seen_domains:
-            continue
-        if any(blocked in domain for blocked in _BLOCKED_DOMAIN_SUBSTRINGS):
             continue
         seen_domains.add(domain)
         targets.append((candidate, domain))
@@ -735,24 +761,75 @@ async def _resolve_company_domain(provider, company_name: str) -> str | None:
     return None
 
 
+async def _find_person_email(
+    db: Session, settings, *, domain: str, full_name: str, use_provider: bool = True
+) -> dict | None:
+    """A named person's address at `domain`, cheapest source first:
+
+    1. The directory already has it — free.
+    2. The company's known format, checked once with the verifier.
+    3. The paid contact provider (Hunter/Prospeo/Apollo), if configured.
+    4. Every common format, checked with the verifier.
+    5. The company's well-evidenced format, offered unconfirmed — only when
+       nothing could check it (no verifier, or a catch-all server), never
+       after a check said the mailbox doesn't exist.
+    """
+    domain = domain.lower()
+    known = contact_directory.known_person_email(db, domain=domain, full_name=full_name)
+    if known is not None:
+        return known
+
+    hints = contact_directory.domain_hints(db, domain)
+    tried: set[str] = set()
+    if hints.preferred_format and not hints.catch_all:
+        found = await guess_person_email(
+            domain=domain, full_name=full_name, settings=settings, hints=hints, max_checks=1
+        )
+        contact_directory.remember_hints(db, domain, hints)
+        if found is not None:
+            return found
+        targeted = address_for(full_name, domain, hints.preferred_format)
+        if targeted:
+            tried.add(targeted)
+
+    if use_provider:
+        found = await find_person_email(domain=domain, full_name=full_name, settings=settings)
+        if found is not None:
+            return found
+
+    found = await guess_person_email(
+        domain=domain,
+        full_name=full_name,
+        settings=settings,
+        hints=hints,
+        exclude=frozenset(tried),
+    )
+    contact_directory.remember_hints(db, domain, hints)
+    if found is not None:
+        return found
+
+    can_check = settings.email_guessing_enabled and (
+        email_verification.get_provider(settings) is not None
+    )
+    if not can_check or hints.catch_all:
+        return contact_directory.pattern_email(db, domain=domain, full_name=full_name)
+    return None
+
+
 async def _resolve_domain_and_email(
-    provider, settings, *, company_name: str, full_name: str
+    db: Session, provider, settings, *, company_name: str, full_name: str
 ) -> tuple[str | None, list[dict]]:
     """Shared best-effort enrichment used by both the profile-snippet
     fallback and bulk contact lookup: resolve a company's domain via an
-    actual search result, then ask the contact provider (Hunter/Prospeo)
-    for a confident business email for this specific person. If it has
-    none, try the common address formats and keep one only if the
-    verification provider confirms the mailbox. Skipped entirely in mock
-    mode — never fabricates either value."""
+    actual search result, then find this specific person's business email
+    (see `_find_person_email`). Skipped entirely in mock mode — never
+    fabricates either value."""
     if provider.name == "mock":
         return None, []
     domain = await _resolve_company_domain(provider, company_name)
     if not domain:
         return None, []
-    found = await find_person_email(domain=domain, full_name=full_name, settings=settings)
-    if found is None:
-        found = await guess_person_email(domain=domain, full_name=full_name, settings=settings)
+    found = await _find_person_email(db, settings, domain=domain, full_name=full_name)
     return domain, ([found] if found else [])
 
 
@@ -826,7 +903,7 @@ async def _preview_from_profile_snippet(
     emails: list[dict] = []
     if parsed.company_name:
         domain, emails = await _resolve_domain_and_email(
-            provider, settings, company_name=parsed.company_name, full_name=parsed.name
+            db, provider, settings, company_name=parsed.company_name, full_name=parsed.name
         )
 
     # An address the person wrote into their headline or About section is
@@ -855,6 +932,7 @@ async def _preview_from_profile_snippet(
         emails=emails,
         phones=snippet_holder.phones,
     )
+    contact_directory.record_candidates(db, [candidate])
     preview = _build_preview(db, candidate, owner_id)
     logger.info(
         "Profile snippet lookup %s previewed contact=%r at company=%r (not saved)",
@@ -878,10 +956,15 @@ async def _preview_from_apollo(db: Session, url: str, *, owner_id: str, settings
 
     emails = [person.email] if person.email else []
     if not emails and person.domain:
-        guessed = await guess_person_email(
-            domain=person.domain, full_name=person.name, settings=settings
+        # Apollo was the provider here; asking it again by name is pointless.
+        found = await _find_person_email(
+            db,
+            settings,
+            domain=person.domain,
+            full_name=person.name,
+            use_provider=settings.contact_provider != "apollo",
         )
-        emails = [guessed] if guessed else []
+        emails = [found] if found else []
 
     candidate = DiscoveredCompany(
         company_name=person.company_name,
@@ -893,6 +976,7 @@ async def _preview_from_apollo(db: Session, url: str, *, owner_id: str, settings
         contact_person_title=person.title,
         emails=emails,
     )
+    contact_directory.record_candidates(db, [candidate])
     preview = _build_preview(db, candidate, owner_id)
     logger.info(
         "Apollo lookup %s previewed contact=%r at company=%r email=%s (not saved)",
@@ -939,7 +1023,7 @@ async def _preview_from_name_and_company(
     settings = get_settings()
     provider = get_search_provider(settings)
     domain, emails = await _resolve_domain_and_email(
-        provider, settings, company_name=company_name, full_name=full_name
+        db, provider, settings, company_name=company_name, full_name=full_name
     )
 
     candidate = DiscoveredCompany(
@@ -950,6 +1034,7 @@ async def _preview_from_name_and_company(
         contact_person_name=full_name,
         emails=emails,
     )
+    contact_directory.record_candidates(db, [candidate])
     preview = _build_preview(db, candidate, owner_id)
     logger.info(
         "Bulk lookup previewed contact=%r at company=%r (not saved)", full_name, company_name

@@ -37,6 +37,7 @@ AUTH_PATHS = (
     "/auth/register",
     "/auth/forgot-password",
     "/auth/reset-password",
+    "/privacy/opt-out",
 )
 
 # Stops the bookkeeping growing without bound if a lot of distinct addresses

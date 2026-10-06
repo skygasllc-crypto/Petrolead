@@ -16,6 +16,7 @@ from app.api.billing import router as billing_router
 from app.api.companies import router as companies_router
 from app.api.emails import router as emails_router
 from app.api.payments import router as payments_router
+from app.api.privacy import router as privacy_router
 from app.api.saved_searches import router as saved_searches_router
 from app.config import get_settings
 from app.core.deps import get_current_admin_user, get_current_user
@@ -151,6 +152,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 
 app.include_router(auth_router, prefix=settings.api_v1_prefix)
+app.include_router(privacy_router, prefix=settings.api_v1_prefix)
 
 # Every other endpoint requires a logged-in user, and only ever sees that
 # account's own saved data.
