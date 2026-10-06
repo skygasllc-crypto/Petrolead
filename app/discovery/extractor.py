@@ -4,9 +4,10 @@ Two extraction paths:
 
 * `company_from_search_result` — cheap, works off the search snippet alone
   (title/url/snippet). Always available.
-* `enrich_from_website` — fetches the company's own homepage (and, if
-  found, its Contact page) and pulls a better description, contact page
-  link, social-profile links, and business emails/phones out of them.
+* `enrich_from_website` — fetches the company's own homepage, its Contact
+  page if it links one, and a few About/Team/Imprint pages, and pulls a
+  better description, contact page link, social-profile links, and
+  business emails/phones out of them.
   Uses httpx + BeautifulSoup against publicly reachable pages only; never
   bypasses logins, CAPTCHAs, or anti-bot protections, and fails soft
   (timeouts / malformed HTML never crash the discovery job).
@@ -23,7 +24,7 @@ from bs4 import BeautifulSoup
 
 from app.config import Settings, get_settings
 from app.core.net_guard import MAX_REDIRECTS, BlockedURLError, block_internal_requests
-from app.discovery.contacts import find_contact_page, find_social_profiles
+from app.discovery.contacts import find_contact_page, find_extra_pages, find_social_profiles
 from app.discovery.emails import MAX_EMAILS_PER_COMPANY, extract_emails, validate_email_domain
 from app.discovery.normalizer import extract_domain
 from app.discovery.phones import (
@@ -139,7 +140,10 @@ async def _fetch_page(
 async def enrich_from_website(
     company: DiscoveredCompany, *, settings: Settings | None = None
 ) -> DiscoveredCompany:
-    """Best-effort enrichment by fetching the company's homepage (and Contact page).
+    """Best-effort enrichment by fetching the company's homepage, its Contact
+    page, and up to `WEBSITE_EXTRA_PAGES` other pages it links to that tend
+    to list addresses (About, Team, Imprint...). The extra pages are fetched
+    together, so they add roughly one page's wait, not several.
 
     Never raises: any network/parse failure just returns `company` unchanged
     (logged, not surfaced as a hard error — a single unreachable site should
@@ -197,7 +201,17 @@ async def enrich_from_website(
                         p for p in contact_socials if p["platform"] not in seen
                     ]
 
-    await _extract_and_validate_contacts(company, pages)
+        extra_urls = find_extra_pages(
+            home_soup,
+            home_url,
+            exclude={home_url, company.contact_page_url or ""},
+            limit=settings.website_extra_pages,
+        )
+        if extra_urls:
+            extra_pages = await asyncio.gather(*(_fetch_page(client, u) for u in extra_urls))
+            pages += [(soup, text) for soup, text, _ in filter(None, extra_pages)]
+
+    await _extract_and_validate_contacts(company, pages, site_domain=extract_domain(home_url))
     return company
 
 
@@ -219,11 +233,16 @@ async def extract_contacts_from_snippet(company: DiscoveredCompany, text: str) -
 
 
 async def _extract_and_validate_contacts(
-    company: DiscoveredCompany, pages: list[tuple[BeautifulSoup | None, str]]
+    company: DiscoveredCompany,
+    pages: list[tuple[BeautifulSoup | None, str]],
+    *,
+    site_domain: str | None = None,
 ) -> None:
     """Phase 3/4: pull emails/phones from the fetched pages and validate them.
 
     A page with no markup (a search snippet) is passed with `soup=None`.
+    Addresses at the company's own domain come first, so the cap drops a
+    web designer's or a partner's address rather than the company's own.
     """
     email_candidates: list[str] = []
     tel_candidates: list[str] = []
@@ -234,7 +253,10 @@ async def _extract_and_validate_contacts(
             tel_candidates.extend(extract_tel_link_candidates(soup))
         text_phone_candidates.extend(extract_phone_text_candidates(text))
 
-    email_candidates = list(dict.fromkeys(email_candidates))[:MAX_EMAILS_PER_COMPANY]
+    email_candidates = list(dict.fromkeys(email_candidates))
+    if site_domain:
+        email_candidates.sort(key=lambda e: not _at_domain(e, site_domain))
+    email_candidates = email_candidates[:MAX_EMAILS_PER_COMPANY]
 
     if email_candidates:
         validations = await asyncio.gather(
@@ -248,6 +270,11 @@ async def _extract_and_validate_contacts(
     company.phones = _validate_and_merge_phones(
         tel_candidates, text_phone_candidates, country=company.country
     )
+
+
+def _at_domain(email: str, site_domain: str) -> bool:
+    domain = email.rsplit("@", 1)[-1].lower()
+    return domain == site_domain or domain.endswith(f".{site_domain}")
 
 
 def _validate_and_merge_phones(

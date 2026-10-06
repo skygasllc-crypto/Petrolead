@@ -1,10 +1,12 @@
 """Business contact discovery (Phase 2).
 
-Extracts exactly two things, and only from links a company has already
+Extracts three things, and only from links a company has already
 published on its own public website:
 
     1. A "Contact" page URL, found by scanning the homepage's own links.
-    2. Social-profile links (LinkedIn, Facebook, X/Twitter, Instagram,
+    2. Other pages on the same site where companies tend to list addresses
+       — About, Team, Leadership, Imprint/Impressum, Legal, Privacy.
+    3. Social-profile links (LinkedIn, Facebook, X/Twitter, Instagram,
        YouTube) the company put in its own page markup.
 
 This is deliberately narrow. It never guesses, infers, or fabricates a
@@ -30,7 +32,30 @@ SOCIAL_DOMAINS: dict[str, str] = {
     "youtube.com": "youtube",
 }
 
-CONTACT_LINK_HINTS = ("contact", "get-in-touch", "reach-us", "reachus", "enquiry", "inquiry")
+CONTACT_LINK_HINTS = (
+    "contact",
+    "get-in-touch",
+    "reach-us",
+    "reachus",
+    "enquiry",
+    "inquiry",
+    # Kontakt (German, Dutch, Nordic, Polish), contato (Portuguese),
+    # contatti (Italian). "contacto"/"contactez" already contain "contact".
+    "kontakt",
+    "contato",
+    "contatti",
+)
+
+# Pages besides Contact that list addresses, most useful first: who works
+# there, then who the company is, then the legal pages that in much of
+# Europe must carry a contact address by law (Impressum).
+EXTRA_PAGE_HINTS = (
+    ("team", "our-people", "people", "staff", "leadership", "management", "directors"),
+    ("about", "who-we-are", "company", "uber-uns", "ueber-uns", "quienes-somos", "chi-siamo"),
+    ("impressum", "imprint", "legal", "mentions-legales", "aviso-legal"),
+    ("privacy", "datenschutz"),
+)
+_SKIPPED_EXTENSIONS = (".pdf", ".jpg", ".jpeg", ".png", ".gif", ".zip", ".doc", ".docx", ".xls")
 
 
 def find_contact_page(soup: BeautifulSoup, base_url: str) -> str | None:
@@ -44,6 +69,39 @@ def find_contact_page(soup: BeautifulSoup, base_url: str) -> str | None:
         if any(hint in haystack for hint in CONTACT_LINK_HINTS):
             return urljoin(base_url, href)
     return None
+
+
+def _host(url: str) -> str:
+    host = (urlparse(url).hostname or "").lower()
+    return host[4:] if host.startswith("www.") else host
+
+
+def find_extra_pages(
+    soup: BeautifulSoup, base_url: str, *, exclude: set[str], limit: int
+) -> list[str]:
+    """Up to `limit` links on this same site to pages that tend to list
+    email addresses (see `EXTRA_PAGE_HINTS`), best first. Only links the
+    page actually has — no URL is made up."""
+    if limit <= 0:
+        return []
+    site = _host(base_url)
+    ranked: dict[str, int] = {}
+    for anchor in soup.find_all("a", href=True):
+        href = anchor["href"].strip()
+        if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
+            continue
+        absolute = urljoin(base_url, href).split("#", 1)[0]
+        if _host(absolute) != site or absolute in exclude:
+            continue
+        path = urlparse(absolute).path.lower()
+        if path in ("", "/") or path.endswith(_SKIPPED_EXTENSIONS):
+            continue
+        haystack = f"{path} {anchor.get_text(strip=True).lower()}"
+        for rank, hints in enumerate(EXTRA_PAGE_HINTS):
+            if any(hint in haystack for hint in hints):
+                ranked[absolute] = min(rank, ranked.get(absolute, rank))
+                break
+    return sorted(ranked, key=ranked.__getitem__)[:limit]
 
 
 def find_social_profiles(soup: BeautifulSoup, base_url: str) -> list[dict[str, str]]:

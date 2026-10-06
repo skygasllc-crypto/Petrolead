@@ -1,9 +1,13 @@
 """Business email extraction & validation (Phase 3).
 
 Extracts email addresses only from a company's own already-fetched public
-pages (homepage + contact page) — from `mailto:` links (high confidence)
-and visible page text (regex, lower confidence but common for a published
-"info@company.com" style address). This platform never emails anyone and
+pages (homepage, contact page, and a few About/Team/Imprint pages) — from
+`mailto:` links (high confidence), visible page text (regex, lower
+confidence but common for a published "info@company.com" style address),
+structured data (`ld+json`), and addresses the site hid from spam bots:
+Cloudflare's email protection and spelled-out forms like
+"info [at] company [dot] com". Those are published for people to read;
+decoding them is reading the page the way a visitor does. This platform never emails anyone and
 never confirms a mailbox actually exists; "validation" here means syntax
 plus a live MX-record check on the domain (does mail routing exist for
 this domain at all) — a public DNS query, not a mailbox probe.
@@ -15,6 +19,7 @@ import asyncio
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import unquote
 
 import dns.resolver
 from bs4 import BeautifulSoup
@@ -63,7 +68,82 @@ _EXCLUDED_DOMAINS = {
 # background url containing an "@2x.png" retina suffix) — filter those out.
 _EXCLUDED_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".css", ".js")
 
-MAX_EMAILS_PER_COMPANY = 5
+MAX_EMAILS_PER_COMPANY = 10
+
+# Cloudflare's "email address obfuscation" replaces every address on a page
+# with "[email protected]" and keeps the real one XOR-encoded in a
+# `data-cfemail` attribute or a /cdn-cgi/l/email-protection#... link. A large
+# share of company sites sit behind Cloudflare, so without decoding these
+# the visible-text regex finds nothing on them at all.
+_CF_PROTECTION_PATH = "/cdn-cgi/l/email-protection#"
+
+# Spelled-out addresses: "info [at] company [dot] com", "sales(at)firm.de".
+# A bracketed "at" is unambiguous. A bare " at " is ordinary English, so it
+# only counts when the domain is spelled out with " dot " as well —
+# otherwise "meet us at noon. Next" would become an address.
+_BRACKET_AT = r"\s*[\[\(\{<]\s*at\s*[\]\)\}>]\s*"
+_BRACKET_DOT = r"\s*(?:[\[\(\{<]\s*dot\s*[\]\)\}>]|\.)\s*"
+_OBFUSCATED_BRACKETED_RE = re.compile(
+    rf"([A-Za-z0-9._%+\-]+){_BRACKET_AT}([A-Za-z0-9\-]+(?:{_BRACKET_DOT}[A-Za-z0-9\-]+)+)",
+    re.IGNORECASE,
+)
+_OBFUSCATED_WORDS_RE = re.compile(
+    r"\b([A-Za-z0-9._%+\-]+)\s+at\s+([A-Za-z0-9\-]+(?:\s+dot\s+[A-Za-z0-9\-]+)+)\b",
+    re.IGNORECASE,
+)
+_DOT_TOKEN_RE = re.compile(r"\s*(?:[\[\(\{<]\s*dot\s*[\]\)\}>]|\s+dot\s+|\.)\s*", re.IGNORECASE)
+
+
+def decode_cfemail(encoded: str) -> str | None:
+    """Decode a Cloudflare-protected address: the first byte is the XOR key
+    for every byte after it."""
+    try:
+        data = bytes.fromhex(encoded.strip())
+    except ValueError:
+        return None
+    if len(data) < 2:
+        return None
+    key = data[0]
+    try:
+        return bytes(b ^ key for b in data[1:]).decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def _cloudflare_emails(soup: BeautifulSoup) -> list[str]:
+    found = []
+    for element in soup.find_all(attrs={"data-cfemail": True}):
+        decoded = decode_cfemail(element["data-cfemail"])
+        if decoded:
+            found.append(decoded)
+    for anchor in soup.find_all("a", href=True):
+        href = anchor["href"]
+        if _CF_PROTECTION_PATH in href:
+            decoded = decode_cfemail(href.split("#", 1)[1])
+            if decoded:
+                found.append(decoded)
+    return found
+
+
+def _structured_data_emails(soup: BeautifulSoup) -> list[str]:
+    """Addresses in schema.org JSON-LD (`"email": "mailto:info@..."`), which
+    sites add for search engines and often don't show as text."""
+    found = []
+    for script in soup.find_all("script", attrs={"type": "application/ld+json"}):
+        found.extend(EMAIL_RE.findall(script.string or ""))
+    return found
+
+
+def deobfuscate_emails(text: str) -> list[str]:
+    """Addresses written out to dodge scrapers, put back together."""
+    found = []
+    for regex in (_OBFUSCATED_BRACKETED_RE, _OBFUSCATED_WORDS_RE):
+        for local, domain in regex.findall(text or ""):
+            domain = _DOT_TOKEN_RE.sub(".", domain).strip(".")
+            address = f"{local}@{domain}"
+            if is_valid_email_syntax(address):
+                found.append(address)
+    return found
 
 
 def extract_emails(soup: BeautifulSoup | None, text: str) -> list[str]:
@@ -73,15 +153,18 @@ def extract_emails(soup: BeautifulSoup | None, text: str) -> list[str]:
     """
     found: set[str] = set()
 
-    for anchor in soup.find_all("a", href=True) if soup is not None else []:
-        href = anchor["href"].strip()
-        if href.lower().startswith("mailto:"):
-            address = href[len("mailto:") :].split("?")[0].strip()
-            if address:
-                found.add(address)
+    if soup is not None:
+        for anchor in soup.find_all("a", href=True):
+            href = anchor["href"].strip()
+            if href.lower().startswith("mailto:"):
+                address = unquote(href[len("mailto:") :].split("?")[0]).strip()
+                if address:
+                    found.add(address)
+        found.update(_cloudflare_emails(soup))
+        found.update(_structured_data_emails(soup))
 
-    for match in EMAIL_RE.findall(text or ""):
-        found.add(match)
+    found.update(EMAIL_RE.findall(text or ""))
+    found.update(deobfuscate_emails(text or ""))
 
     cleaned: list[str] = []
     for email in found:

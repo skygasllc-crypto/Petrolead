@@ -22,7 +22,7 @@ SUPPORTED_EMAIL_VERIFY_PROVIDERS = frozenset({"mx", "millionverifier"})
 # Providers that can find a named person's business email. Each needs its
 # own key; an unset key disables the provider rather than failing every
 # lookup. Keep in step with app/discovery/email_finder.py.
-SUPPORTED_CONTACT_PROVIDERS = frozenset({"hunter", "prospeo"})
+SUPPORTED_CONTACT_PROVIDERS = frozenset({"hunter", "prospeo", "apollo"})
 
 
 class Settings(BaseSettings):
@@ -75,6 +75,29 @@ class Settings(BaseSettings):
     # so the dependency can be moved if terms or coverage demand it.
     contact_provider: str = "hunter"
     prospeo_api_key: str | None = None
+    # https://apollo.io/ — when set, a LinkedIn profile lookup asks Apollo
+    # for that exact profile first (name, title, employer and work email),
+    # whatever CONTACT_PROVIDER says. CONTACT_PROVIDER=apollo also uses it
+    # for name + company lookups.
+    apollo_api_key: str | None = None
+
+    # --- Finding more emails ---
+    # Besides the homepage and Contact page, how many of a company's own
+    # About/Team/Imprint pages to read for addresses. Each one is another
+    # page fetch per company, so 0 turns it off.
+    website_extra_pages: int = 3
+    # When a company's website shows no email, ask Hunter's domain search
+    # for the addresses it knows at that domain. Needs HUNTER_IO_API_KEY,
+    # and each lookup spends one of *your* Hunter credits, so it is capped
+    # per search.
+    domain_search_enabled: bool = True
+    domain_search_max_per_search: int = 20
+    # When no provider finds a named person's email, try the usual formats
+    # (first.last@, flast@, ...) and keep the first one the verification
+    # provider confirms. Needs EMAIL_VERIFY_PROVIDER with a key, and spends
+    # up to `email_guess_max_checks` of *your* verification credits a person.
+    email_guessing_enabled: bool = True
+    email_guess_max_checks: int = 8
 
     # --- HTTP / extraction ---
     http_timeout_seconds: int = 10
@@ -153,6 +176,7 @@ class Settings(BaseSettings):
         "docs_enabled",
         "email_verify_api_key",
         "prospeo_api_key",
+        "apollo_api_key",
         "hunter_io_api_key",
         "google_cse_api_key",
         "google_cse_engine_id",

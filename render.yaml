@@ -77,12 +77,14 @@ services:
       - key: HUNTER_IO_API_KEY
         sync: false
       # Which service resolves a person's business email: "hunter" (default)
-      # or "prospeo", each with its own key. An unrecognised name stops the
+      # "prospeo" or "apollo", each with its own key. An unrecognised name stops the
       # service at startup rather than silently finding no emails at all —
       # so a typo here is a failed deploy, by design.
       - key: CONTACT_PROVIDER
         sync: false
       - key: PROSPEO_API_KEY
+        sync: false
+      - key: APOLLO_API_KEY
         sync: false
       # PUBLIC receiving addresses only. Never a private key or seed phrase.
       - key: CRYPTO_BTC_ADDRESS
@@ -155,6 +157,8 @@ services:
       - key: CONTACT_PROVIDER
         sync: false
       - key: PROSPEO_API_KEY
+        sync: false
+      - key: APOLLO_API_KEY
         sync: false
 
   - type: web

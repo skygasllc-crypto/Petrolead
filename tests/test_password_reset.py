@@ -3,6 +3,7 @@ hands over when the app can't send email."""
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 from urllib.parse import parse_qs, urlparse
 
@@ -77,15 +78,36 @@ class TestForgotPassword:
         assert [m["email"] for m in sent] == ["user@example.com"]
 
     def test_without_smtp_nothing_is_sent_and_the_link_is_not_logged(
-        self, unauthenticated_client, caplog
+        self, unauthenticated_client
     ):
-        _register(unauthenticated_client, "user@example.com")
-        with caplog.at_level("INFO"):
+        # caplog can't see app loggers (propagation is off), so capture from
+        # the loggers themselves — see tests/test_contact_providers.py.
+        from app.api import auth
+        from app.services import notifications
+
+        records = []
+
+        class Capture(logging.Handler):
+            def emit(self, record):
+                records.append(record)
+
+        handler = Capture(level=logging.DEBUG)
+        loggers = [auth.logger, notifications.logger]
+        for logger in loggers:
+            logger.addHandler(handler)
+        try:
+            _register(unauthenticated_client, "user@example.com")
             response = unauthenticated_client.post(
                 "/api/auth/forgot-password", json={"email": "user@example.com"}
             )
+        finally:
+            for logger in loggers:
+                logger.removeHandler(handler)
+
         assert response.status_code == 202
-        assert "token=" not in caplog.text
+        messages = [r.getMessage() for r in records]
+        assert any("email isn't configured" in m for m in messages)
+        assert not any("token=" in m for m in messages)
 
 
 class TestResetPassword:

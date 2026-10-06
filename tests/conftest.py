@@ -25,6 +25,12 @@ os.environ["ADMIN_EMAILS"] = ""
 # Plan and credit limits are off for the suite as a whole — tests aren't
 # about billing unless they turn it on themselves (see tests/test_billing.py).
 os.environ["BILLING_ENFORCED"] = "false"
+# Domain search and address guessing spend real Hunter and verification
+# credits, and a developer's .env may hold working keys — off for the suite;
+# tests/test_finding_more_emails.py passes its own settings.
+os.environ["DOMAIN_SEARCH_ENABLED"] = "false"
+os.environ["EMAIL_GUESSING_ENABLED"] = "false"
+os.environ["APOLLO_API_KEY"] = ""
 # Tests build their schema straight from the models on an in-memory
 # database (the `db_session` fixture below); migrations have their own
 # tests in tests/test_migrations.py.

@@ -28,7 +28,13 @@ from app.database.models import (
     utcnow,
 )
 from app.discovery.deduplicator import find_match, is_confident_match
-from app.discovery.email_finder import find_person_email
+from app.discovery.email_finder import (
+    apollo_match,
+    find_domain_emails,
+    find_person_email,
+    guess_person_email,
+)
+from app.discovery.emails import MAX_EMAILS_PER_COMPANY
 from app.discovery.extractor import extract_contacts_from_snippet
 from app.discovery.lead_scoring import compute_lead_score
 from app.discovery.normalizer import extract_domain, normalize_company_name
@@ -512,6 +518,7 @@ async def discover_preview(
         return search_query, []
 
     candidates = _merge_candidates_in_memory(candidates)
+    await _add_domain_search_emails(candidates)
     logger.info("Search %s: %d candidate(s) previewed, not saved", search_query.id, len(candidates))
 
     previews = [_build_preview(db, c, owner_id) for c in candidates if c.company_name.strip()]
@@ -558,6 +565,7 @@ async def run_discovery(db: Session, payload: DiscoverRequestSchema, owner_id: s
         search_query.emails_found = 0
         return search_query
 
+    await _add_domain_search_emails(candidates)
     logger.info(
         "Search %s: %d candidate(s) discovered, deduplicating", search_query.id, len(candidates)
     )
@@ -636,6 +644,7 @@ async def discover_from_url_preview(db: Session, url: str, owner_id: str) -> dic
 
     candidates = await WebsiteSource(url).discover(DiscoveryRequest())
     candidate = candidates[0]
+    await _add_domain_search_emails(candidates)
 
     learned_anything = bool(
         candidate.company_name != candidate.website
@@ -663,6 +672,50 @@ _BLOCKED_DOMAIN_SUBSTRINGS = {
 }
 
 
+# Hunter allows 15 requests a second; staying well under keeps one large
+# search from tripping its rate limit.
+MAX_CONCURRENT_DOMAIN_SEARCHES = 5
+
+
+async def _add_domain_search_emails(candidates: list[DiscoveredCompany]) -> None:
+    """For companies whose own website listed no email, add the addresses
+    Hunter knows at their domain. Capped per search because every lookup
+    spends one of the operator's Hunter credits; a no-op when Hunter isn't
+    configured, and never for mock data or a social/directory "website"."""
+    settings = get_settings()
+    if not settings.domain_search_enabled or not settings.hunter_io_api_key:
+        return
+    targets: list[tuple[DiscoveredCompany, str]] = []
+    seen_domains: set[str] = set()
+    for candidate in candidates:
+        if candidate.is_mock or candidate.emails:
+            continue
+        domain = extract_domain(candidate.website)
+        if not domain or domain in seen_domains:
+            continue
+        if any(blocked in domain for blocked in _BLOCKED_DOMAIN_SUBSTRINGS):
+            continue
+        seen_domains.add(domain)
+        targets.append((candidate, domain))
+    targets = targets[: settings.domain_search_max_per_search]
+    if not targets:
+        return
+
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_DOMAIN_SEARCHES)
+
+    async def _search(candidate: DiscoveredCompany, domain: str) -> None:
+        async with semaphore:
+            found = await find_domain_emails(domain=domain, settings=settings)
+        candidate.emails = found[:MAX_EMAILS_PER_COMPANY]
+
+    await asyncio.gather(*(_search(c, d) for c, d in targets))
+    logger.info(
+        "Domain search: %d of %d companies without a website email now have one",
+        sum(1 for c, _ in targets if c.emails),
+        len(targets),
+    )
+
+
 async def _resolve_company_domain(provider, company_name: str) -> str | None:
     """Best-effort: the likely official website domain for a company name,
     taken only from an actual search-engine result — never guessed, and
@@ -687,15 +740,19 @@ async def _resolve_domain_and_email(
 ) -> tuple[str | None, list[dict]]:
     """Shared best-effort enrichment used by both the profile-snippet
     fallback and bulk contact lookup: resolve a company's domain via an
-    actual search result, then (if `HUNTER_IO_API_KEY` is configured) ask
-    Hunter.io for a confident business email for this specific person.
-    Skipped entirely in mock mode — never fabricates either value."""
+    actual search result, then ask the contact provider (Hunter/Prospeo)
+    for a confident business email for this specific person. If it has
+    none, try the common address formats and keep one only if the
+    verification provider confirms the mailbox. Skipped entirely in mock
+    mode — never fabricates either value."""
     if provider.name == "mock":
         return None, []
     domain = await _resolve_company_domain(provider, company_name)
     if not domain:
         return None, []
     found = await find_person_email(domain=domain, full_name=full_name, settings=settings)
+    if found is None:
+        found = await guess_person_email(domain=domain, full_name=full_name, settings=settings)
     return domain, ([found] if found else [])
 
 
@@ -716,9 +773,18 @@ async def _preview_from_profile_snippet(
     a company is preview-only: `companies.company_name` is NOT NULL, so it
     can't be saved until the user names an employer.
 
+    When Apollo is configured, a LinkedIn profile is first looked up there
+    by its URL (see `_preview_from_apollo`); the search listing is only
+    the fallback for people Apollo doesn't have.
+
     Fails only when the profile has no usable public listing at all.
     """
     settings = get_settings()
+    if platform == "linkedin" and settings.apollo_api_key:
+        preview = await _preview_from_apollo(db, url, owner_id=owner_id, settings=settings)
+        if preview is not None:
+            return preview
+
     provider = get_search_provider(settings)
     query = build_profile_snippet_query(url)
 
@@ -795,6 +861,45 @@ async def _preview_from_profile_snippet(
         url,
         parsed.name,
         parsed.company_name,
+    )
+    return preview
+
+
+async def _preview_from_apollo(db: Session, url: str, *, owner_id: str, settings) -> dict | None:
+    """A LinkedIn profile as Apollo knows it — name, title, employer and,
+    when Apollo has it, a work email. Apollo matches the profile URL itself,
+    so this works for people no search engine has a listing for. When Apollo
+    knows the employer's domain but not the address, the usual formats are
+    tried against the verification provider. None when Apollo has no match,
+    so the caller can fall back to the search listing."""
+    person = await apollo_match(settings=settings, linkedin_url=url)
+    if person is None:
+        return None
+
+    emails = [person.email] if person.email else []
+    if not emails and person.domain:
+        guessed = await guess_person_email(
+            domain=person.domain, full_name=person.name, settings=settings
+        )
+        emails = [guessed] if guessed else []
+
+    candidate = DiscoveredCompany(
+        company_name=person.company_name,
+        website=f"https://{person.domain}" if person.domain else None,
+        source="apollo",
+        source_url=url,
+        social_profiles=[{"platform": "linkedin", "url": url}],
+        contact_person_name=person.name,
+        contact_person_title=person.title,
+        emails=emails,
+    )
+    preview = _build_preview(db, candidate, owner_id)
+    logger.info(
+        "Apollo lookup %s previewed contact=%r at company=%r email=%s (not saved)",
+        url,
+        person.name,
+        person.company_name,
+        "yes" if emails else "no",
     )
     return preview
 
