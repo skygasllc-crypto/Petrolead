@@ -99,6 +99,17 @@ class Settings(BaseSettings):
     email_guessing_enabled: bool = True
     email_guess_max_checks: int = 8
 
+    # --- Background crawler ---
+    # Reads queued company websites for addresses on a schedule (the worker,
+    # every 30 minutes) so the contact directory grows between searches.
+    # Reading sites is free; only seed searches spend search credits.
+    crawler_enabled: bool = True
+    crawler_batch_size: int = 25
+    crawler_recrawl_days: int = 30
+    # Search-provider queries per run to find new company sites. Each is
+    # one search credit; 0 turns seeding off.
+    crawler_seed_searches_per_run: int = 2
+
     # --- HTTP / extraction ---
     http_timeout_seconds: int = 10
     # Sent on every page we fetch. Site owners read this in their logs and

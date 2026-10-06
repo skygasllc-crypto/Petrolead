@@ -12,6 +12,10 @@ redis`, or point `REDIS_URL` at any reachable Redis):
 
     celery -A app.worker worker --beat --loglevel=info
 
+It also runs the background crawler twice an hour (see
+`app.services.crawler`), which reads queued company websites into the
+shared contact directory.
+
 The beat schedule checks every 15 minutes for saved searches whose
 `next_run_at` has passed and are `is_active`; each one is executed
 through the exact same `run_discovery` pipeline a manual search uses, so
@@ -29,6 +33,7 @@ from celery.schedules import crontab
 from app.config import get_settings
 from app.core.logging import setup_logging
 from app.database.connection import SessionLocal
+from app.services.crawler import run_crawler
 from app.services.saved_search_service import run_due_saved_searches
 
 setup_logging()
@@ -42,7 +47,11 @@ celery_app.conf.beat_schedule = {
     "run-due-saved-searches": {
         "task": "app.worker.run_due_saved_searches_task",
         "schedule": crontab(minute="*/15"),
-    }
+    },
+    "run-crawler": {
+        "task": "app.worker.run_crawler_task",
+        "schedule": crontab(minute="5,35"),
+    },
 }
 
 
@@ -53,5 +62,18 @@ def run_due_saved_searches_task() -> int:
         count = asyncio.run(run_due_saved_searches(db))
         logger.info("Scheduled task: ran %d due saved search(es)", count)
         return count
+    finally:
+        db.close()
+
+
+@celery_app.task(name="app.worker.run_crawler_task")
+def run_crawler_task() -> int:
+    """Read the company sites that are due and grow the contact directory
+    (see app.services.crawler). Offset from the saved-search run so the two
+    don't compete for the single worker process."""
+    db = SessionLocal()
+    try:
+        summary = asyncio.run(run_crawler(db))
+        return summary.emails_found
     finally:
         db.close()

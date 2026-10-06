@@ -230,6 +230,10 @@ export const api = {
 
   cancelOrder: (orderId) => request(`/billing/orders/${orderId}/cancel`, { method: "POST" }),
 
+  adminDirectory: () => request("/admin/directory"),
+
+  adminStartCrawl: () => request("/admin/directory/crawl", { method: "POST" }),
+
   adminListPayments: (status) => request(`/admin/payments${toQuery({ status })}`),
 
   adminPendingPaymentsCount: () => request("/admin/payments/pending-count"),

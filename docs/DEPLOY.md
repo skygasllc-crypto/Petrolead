@@ -187,6 +187,9 @@ missing:
 4. Sign in as an admin address and open **Payments**.
 5. Create a scheduled search and check the worker's log picks it up within
    15 minutes — that's the only way to know the worker is really running.
+6. The worker also runs the background crawler twice an hour: its log shows
+   a `Crawler run:` line, and Admin → Directory shows sites being read.
+   Without a worker, "Crawl now" on that page runs one batch at a time.
 
 ## 7. Rolling back
 

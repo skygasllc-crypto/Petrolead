@@ -571,3 +571,41 @@ class SuppressedEmail(Base):
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<SuppressedEmail email={self.email!r}>"
+
+
+class CrawlTarget(Base):
+    """A company website the background crawler reads for addresses (see
+    `app.services.crawler`). Every site a search turns up joins the queue,
+    as do sites found by the crawler's own seed searches."""
+
+    __tablename__ = "crawl_targets"
+
+    domain: Mapped[str] = mapped_column(String(255), primary_key=True)
+    website: Mapped[str] = mapped_column(Text, nullable=False)
+    company_name: Mapped[str | None] = mapped_column(String(500))
+    # How it joined: "search" (a customer's search found it) or "seed".
+    source: Mapped[str] = mapped_column(String(50), nullable=False)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    last_crawled_at: Mapped[datetime | None] = mapped_column(DateTime)
+    next_crawl_at: Mapped[datetime] = mapped_column(DateTime, index=True, default=utcnow)
+    emails_found: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Consecutive failed visits; each one pushes the next visit further out.
+    failures: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<CrawlTarget domain={self.domain!r}>"
+
+
+class CrawlSeed(Base):
+    """One seed search ("crude oil trading Nigeria") the crawler runs to
+    find company sites nobody has searched for yet. The least recently run
+    seed goes next, so the whole list is covered in turn."""
+
+    __tablename__ = "crawl_seeds"
+
+    query: Mapped[str] = mapped_column(String(300), primary_key=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime)
+    sites_found: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<CrawlSeed query={self.query!r}>"

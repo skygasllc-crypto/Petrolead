@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -18,7 +18,7 @@ from app.api.auth import password_reset_url
 from app.config import get_settings
 from app.core.deps import get_current_admin_user
 from app.core.security import PASSWORD_RESET_EXPIRE_MINUTES
-from app.database.connection import get_db
+from app.database.connection import SessionLocal, get_db
 from app.database.models import User
 from app.schemas_auth import (
     AdminUserSchema,
@@ -32,7 +32,7 @@ from app.schemas_billing import (
     ConfirmPaymentRequestSchema,
     RejectPaymentRequestSchema,
 )
-from app.services import billing_service, payment_service
+from app.services import billing_service, crawler, payment_service
 
 logger = logging.getLogger("petrolead.api.admin")
 
@@ -218,3 +218,33 @@ def reject_payment(
     """Reject a payment that didn't arrive or doesn't match. The note is shown to the customer."""
     order = payment_service.reject_order(db, order_id, admin=current_admin, note=payload.note)
     return payment_service.serialize_order(order, include_customer=True)
+
+
+@router.get("/directory")
+def directory_stats(db: Session = Depends(get_db)) -> dict:
+    """The contact directory's size and the crawler's progress."""
+    return crawler.directory_stats(db)
+
+
+async def _crawl_in_background() -> None:
+    # Its own session: the request's is closed by the time this runs.
+    db = SessionLocal()
+    try:
+        await crawler.run_crawler(db)
+    except Exception:
+        logger.exception("A crawler run started from the admin page failed")
+    finally:
+        db.close()
+
+
+@router.post("/directory/crawl", status_code=202)
+def start_crawl(
+    background_tasks: BackgroundTasks,
+    current_admin: User = Depends(get_current_admin_user),
+) -> dict:
+    """Run one crawler batch now, without waiting for the worker — and the
+    only way to run it at all where no worker is deployed. Runs after the
+    response, since a batch takes a minute or two."""
+    background_tasks.add_task(_crawl_in_background)
+    logger.info("Admin %s started a crawler run", current_admin.id)
+    return {"detail": "Crawl started. Refresh in a couple of minutes to see the results."}

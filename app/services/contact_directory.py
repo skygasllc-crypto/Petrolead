@@ -23,6 +23,8 @@ from sqlalchemy.orm import Session
 from app.database.models import ContactRecord, EmailDomain, SuppressedEmail, utcnow
 from app.discovery import email_verification as verification
 from app.discovery.email_finder import DomainHints, address_for, format_of, name_parts
+from app.discovery.normalizer import extract_domain
+from app.discovery.search import B2B_DIRECTORY_DOMAINS
 from app.discovery.types import DiscoveredCompany
 
 logger = logging.getLogger("petrolead.services.contact_directory")
@@ -30,6 +32,34 @@ logger = logging.getLogger("petrolead.services.contact_directory")
 # How many known addresses must share a format before an address built from
 # it is offered without a mailbox check. One could be a coincidence.
 MIN_PATTERN_EVIDENCE = 2
+
+# Hosts that turn up as a result's "website" but are never a company's own
+# site: social platforms and B2B directories.
+NOT_A_COMPANY_SITE = {
+    "linkedin.com",
+    "facebook.com",
+    "twitter.com",
+    "x.com",
+    "instagram.com",
+    *B2B_DIRECTORY_DOMAINS,
+}
+
+
+def site_domain(url: str | None) -> str | None:
+    """The domain of a company's own website, or None for a social or
+    directory page."""
+    domain = extract_domain(url)
+    if not domain or any(blocked in domain for blocked in NOT_A_COMPANY_SITE):
+        return None
+    return domain
+
+
+def company_mail_domain(candidate: DiscoveredCompany) -> str | None:
+    """A result's own mail domain, or None for mock data and for a
+    "website" that is really a social or directory page."""
+    if candidate.is_mock:
+        return None
+    return site_domain(candidate.website)
 
 
 def _name_key(full_name: str | None) -> str | None:

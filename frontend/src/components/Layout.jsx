@@ -105,6 +105,7 @@ function AppShell() {
         ...NAV_ITEMS,
         { to: "/admin/payments", label: "Payments", badge: pendingPayments },
         { to: "/admin/users", label: "Users" },
+        { to: "/admin/directory", label: "Directory" },
       ]
     : NAV_ITEMS;
 

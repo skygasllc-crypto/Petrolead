@@ -49,14 +49,13 @@ from app.discovery.profile_lookup import (
 )
 from app.discovery.relevance import score_relevance
 from app.discovery.search import (
-    B2B_DIRECTORY_DOMAINS,
     SearchQuotaExceededError,
     get_search_provider,
 )
 from app.discovery.sources import B2BSource, SearchSource, SocialSource, WebsiteSource
 from app.discovery.types import DiscoveredCompany, DiscoveryRequest
 from app.schemas import DiscoverRequestSchema
-from app.services import contact_directory
+from app.services import contact_directory, crawler
 
 logger = logging.getLogger("petrolead.services.company")
 
@@ -665,14 +664,7 @@ async def discover_from_url_preview(db: Session, url: str, owner_id: str) -> dic
     return preview
 
 
-_BLOCKED_DOMAIN_SUBSTRINGS = {
-    "linkedin.com",
-    "facebook.com",
-    "twitter.com",
-    "x.com",
-    "instagram.com",
-    *B2B_DIRECTORY_DOMAINS,
-}
+_BLOCKED_DOMAIN_SUBSTRINGS = contact_directory.NOT_A_COMPANY_SITE
 
 
 # Hunter allows 15 requests a second; staying well under keeps one large
@@ -680,29 +672,19 @@ _BLOCKED_DOMAIN_SUBSTRINGS = {
 MAX_CONCURRENT_DOMAIN_SEARCHES = 5
 
 
-def _email_domain(candidate: DiscoveredCompany) -> str | None:
-    """The company's own mail domain, or None for mock data and for a
-    "website" that is really a social or directory page."""
-    if candidate.is_mock:
-        return None
-    domain = extract_domain(candidate.website)
-    if not domain or any(blocked in domain for blocked in _BLOCKED_DOMAIN_SUBSTRINGS):
-        return None
-    return domain
-
-
 async def _fill_missing_emails(db: Session, candidates: list[DiscoveredCompany]) -> None:
     """For results whose own website showed no email: first the addresses
     the directory already has at that domain (free), then Hunter's domain
     search for the rest. Whatever was found is then added to the directory."""
     for candidate in candidates:
-        domain = _email_domain(candidate)
+        domain = contact_directory.company_mail_domain(candidate)
         if domain and not candidate.emails:
             candidate.emails = contact_directory.known_domain_emails(
                 db, domain, limit=MAX_EMAILS_PER_COMPANY
             )
     await _add_domain_search_emails(candidates)
     contact_directory.record_candidates(db, candidates)
+    crawler.enqueue_candidates(db, candidates)
 
 
 async def _add_domain_search_emails(candidates: list[DiscoveredCompany]) -> None:
@@ -718,7 +700,7 @@ async def _add_domain_search_emails(candidates: list[DiscoveredCompany]) -> None
     for candidate in candidates:
         if candidate.emails:
             continue
-        domain = _email_domain(candidate)
+        domain = contact_directory.company_mail_domain(candidate)
         if not domain or domain in seen_domains:
             continue
         seen_domains.add(domain)
